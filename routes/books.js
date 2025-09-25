@@ -17,7 +17,7 @@ router.get('/', (req, res) => {
     return res.status(400).json({ error: 'Invalid category' });
   }
 
-  const sql = 'SELECT id, title, author, status FROM books WHERE category = ? ORDER BY title ASC';
+  const sql = 'SELECT id, title, author, isbn, status FROM books WHERE category = ? ORDER BY title ASC';
   db.all(sql, [category], (err, rows) => {
     if (err) {
       console.error(err.message);
@@ -72,6 +72,46 @@ router.get('/categories', (req, res) => {
     const categories = rows.map(row => row.category);
     res.json(categories);
   });
+});
+
+// --- Mark Book as Returned (POST /api/books/return) ---
+router.post('/return', async (req, res) => {
+  // TODO: Add authorization middleware here to ensure only librarians/admin can use this
+  const { book_id } = req.body;
+
+  if (!book_id) {
+    return res.status(400).json({ success: false, message: 'Book ID is required to return a book.' });
+  }
+
+  const newStatus = 'Available'; // A returned book becomes available
+
+  try {
+    // First, get book details for the success message
+    const book = await allDb('SELECT title, status FROM books WHERE id = ?', [book_id]);
+    if (book.length === 0) {
+      return res.status(404).json({ success: false, message: 'Book not found.' });
+    }
+    const currentStatus = book[0].status;
+    const bookTitle = book[0].title;
+
+    // Update the book status
+    const result = await runDb('UPDATE books SET status = ? WHERE id = ?', [newStatus, book_id]);
+    
+    if (result.changes === 0 && currentStatus === newStatus) {
+      // If no changes, but status was already Available, it's still a success
+      return res.json({ success: true, message: `Book "${bookTitle}" was already Available.`, bookTitle });
+    } else if (result.changes === 0) {
+      return res.status(500).json({ success: false, message: 'Failed to update book status in database.' });
+    }
+
+    //log this return event in a 'transactions' or 'borrow_history' table
+    // For example: await runDb('INSERT INTO transactions (book_id, student_id, type, date) VALUES (?, ?, ?, ?)', [book_id, student_id, 'return', new Date().toISOString()]);
+
+    res.json({ success: true, message: `Book "${bookTitle}" successfully marked as Available.`, bookTitle });
+  } catch (err) {
+    console.error('Error marking book as returned:', err.message);
+    res.status(500).json({ success: false, error: 'Database error while returning book.' });
+  }
 });
 
 // Toggle book status

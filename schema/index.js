@@ -25,7 +25,7 @@ db.serialize(() => {
   const createStudentTableSql = `
     CREATE TABLE IF NOT EXISTS student (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE,
-      course TEXT, year_level TEXT, password TEXT NOT NULL
+      course TEXT, year_level TEXT, password TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'student'
     );`;
   db.run(createStudentTableSql, (err) => {
     if (err) console.error('Error creating student table:', err.message);

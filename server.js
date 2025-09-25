@@ -54,25 +54,60 @@ app.post('/signup', (req, res) => {
 app.post('/signin', (req, res) => {
   const { email, password } = req.body;
 
-  const query = 'SELECT * FROM student WHERE email = ?';
-  db.get(query, [email], async (err, user) => { // db.get for a single row
+  if (!email || !password) {
+    return res.status(400).json({ success: false, message: 'Email and password are required' });
+  }
+
+  // Step 1: Check if the user is a librarian
+  const librarianQuery = 'SELECT * FROM librarians WHERE email = ?';
+  db.get(librarianQuery, [email], async (err, librarian) => {
     if (err) {
-      console.error(err);
-      return res.json({ success: false, message: 'Database error' });
-    }
-    if (!user) {
-      return res.json({ success: false, message: 'Student not found' });
+      console.error("Database error (librarian check):", err.message);
+      return res.status(500).json({ success: false, message: 'Database error' });
     }
 
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.json({ success: false, message: 'Incorrect password' });
+    // --- If a librarian is found ---
+    if (librarian) {
+      const isMatch = await bcrypt.compare(password, librarian.password);
+      if (isMatch) {
+        // Successful librarian login
+        return res.json({
+          success: true,
+          name: librarian.name,
+          role: librarian.role, // e.g., 'librarian'
+        });
+      } else {
+        // Found the user but the password was wrong. Fail immediately.
+        return res.json({ success: false, message: 'Invalid credentials' });
+      }
     }
 
-    res.json({
-      success: true,
-      name: user.name,
-      studentId: user.id
+    // --- Step 2: If no librarian was found, check if the user is a student ---
+    const studentQuery = 'SELECT id, name, email, course, year_level, password, role FROM student WHERE email = ?';
+    db.get(studentQuery, [email], async (err, student) => {
+      if (err) {
+        console.error("Database error (student check):", err.message);
+        return res.status(500).json({ success: false, message: 'Database error' });
+      }
+
+      // --- If a student is found ---
+      if (student) {
+        console.log("Student found:", student.email);
+        const isMatch = await bcrypt.compare(password, student.password);
+        if (isMatch) {
+          // Successful student login
+          return res.json({
+            success: true,
+            name: student.name,
+            studentId: student.id,
+            role: student.role || 'student'
+          });
+        }
+      }
+
+      // --- If user is not found in either table or password was wrong for student ---
+      // We use a generic message for security to prevent attackers from knowing if an email exists.
+      return res.json({ success: false, message: 'Invalid credentials' });
     });
   });
 });
@@ -108,7 +143,7 @@ app.get('/verify', (req, res) => {
   const { id } = req.query;
   if (!id) return res.json({ success: false, message: 'No ID provided' });
 
-  db.get('SELECT * FROM student WHERE id = ?', [id], (err, row) => {
+  db.get('SELECT id, name, email, course, year_level, password, role FROM student WHERE id = ?', [id], (err, row) => {
     if (err) {
       console.error(err);
       return res.json({ success: false, message: 'Database error' });
@@ -118,6 +153,37 @@ app.get('/verify', (req, res) => {
     }
     res.json({ success: true, user: row });
   });
+});
+
+// ===================== LIBRARIAN STATS =====================
+app.get('/api/librarian/stats', async (req, res) => {
+  try {
+    // Helper function to run a single query and return its result
+    const getCount = (sql) => new Promise((resolve, reject) => {
+      db.get(sql, [], (err, row) => {
+        if (err) return reject(err);
+        resolve(row ? Object.values(row)[0] : 0); // Get the first column value (e.g., count)
+      });
+    });
+
+    const totalBooks = await getCount('SELECT COUNT(*) FROM books');
+    const borrowedBooks = await getCount('SELECT COUNT(*) FROM books WHERE status = "Borrowed"');
+    const activeStudents = await getCount('SELECT COUNT(*) FROM student');
+    
+    // For visits today, SQLite's date('now') returns YYYY-MM-DD
+    const visitsToday = await getCount('SELECT COUNT(*) FROM bookings WHERE date = date("now")');
+
+    res.json({
+      totalBooks,
+      borrowedBooks,
+      activeStudents,
+      visitsToday,
+    });
+
+  } catch (err) {
+    console.error("Error fetching admin stats:", err.message);
+    res.status(500).json({ error: "Failed to fetch dashboard statistics" });
+  }
 });
 
 
@@ -172,6 +238,101 @@ app.post("/api/contact", (req, res) => {
     return res.status(201).json({ id, message: "Message received successfully" });
   });
 });
+
+// ===================== API FOR MANAGING STUDENTS =====================
+app.get('/api/students', (req, res) => {
+  const sql = `
+    SELECT id, name, email, year_level, password, role
+    FROM student
+    ORDER BY id ASC
+  `;
+
+  db.all(sql, [], (err, rows) => {
+    if (err) {
+      console.error('Error fetching students:', err.message);
+      return res.status(500).json({
+        success: false,
+        error: 'Database error fetching students.',
+      });
+    }
+
+    // rows is ALWAYS an array with sqlite3
+    res.json({
+      success: true,
+      students: rows || [],
+    });
+  });
+});
+
+//for future use (suspend/activate student)
+app.post('/api/students/toggle-status', async (req, res) => {
+  // TODO: Add authorization middleware here
+  const { studentId, newStatus } = req.body;
+  if (!studentId || !newStatus) {
+    return res.status(400).json({ success: false, message: 'Missing student ID or new status.' });
+  }
+  if (!['Active', 'Suspended'].includes(newStatus)) {
+    return res.status(400).json({ success: false, message: 'Invalid status provided.' });
+  }
+
+  try {
+    const result = db.run('UPDATE student SET status = ? WHERE id = ?', [newStatus, studentId]);
+    if (result.changes === 0) {
+      return res.status(404).json({ success: false, message: 'Student not found.' });
+    }
+    res.json({ success: true, message: 'Student status updated.' });
+  } catch (err) {
+    console.error('Error toggling student status:', err.message);
+    res.status(500).json({ success: false, error: 'Database error updating student status.' });
+  }
+});
+
+// ===================== API FOR MANAGING BOOKINGS =====================
+app.get('/api/bookings', (req, res) => {
+  // TODO: Add authorization middleware here
+  db.all(
+    `SELECT id, name, email, date, timeSlot, purpose, notes, createdAt, status 
+     FROM bookings 
+     ORDER BY createdAt DESC`,
+    [],
+    (err, rows) => {
+      if (err) {
+        console.error('Error fetching bookings:', err.message);
+        return res.status(500).json({ success: false, error: 'Database error fetching bookings.' });
+      }
+      res.json({ success: true, bookings: rows || [] });
+    }
+  );
+});
+
+app.post('/api/bookings/update-status', (req, res) => {
+  const { bookingId, newStatus } = req.body;
+
+  if (!bookingId || !newStatus) {
+    return res.status(400).json({ success: false, message: 'Missing booking ID or new status.' });
+  }
+  if (!['Pending', 'Confirmed', 'Cancelled'].includes(newStatus)) {
+    return res.status(400).json({ success: false, message: 'Invalid status provided.' });
+  }
+
+  db.run(
+    'UPDATE bookings SET request_status = ? WHERE id = ?',
+    [newStatus, bookingId],
+    function (err) {
+      if (err) {
+        console.error('Error updating booking status:', err.message);
+        return res.status(500).json({ success: false, error: 'Database error updating booking status.' });
+      }
+
+      if (this.changes === 0) {
+        return res.status(404).json({ success: false, message: 'Booking not found.' });
+      }
+
+      res.json({ success: true, message: 'Booking status updated.' });
+    }
+  );
+});
+
 
 app.use('/api/books', booksRouter);
 
