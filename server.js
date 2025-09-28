@@ -108,7 +108,7 @@ app.get('/generate-qr', async (req, res) => {
       return res.json({ success: false, message: 'Student not found' });
     }
 
-    const qrData = `http://localhost:3000/scan?id=${id}`;
+    const qrData = `https://acc-library-management-system-frontend.onrender.com/scan?id=${id}`;
     const qrBase64 = await QRCode.toDataURL(qrData);
     res.json({ success: true, qrImage: qrBase64 });
   } catch (err) {
