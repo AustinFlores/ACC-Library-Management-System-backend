@@ -108,7 +108,8 @@ app.get('/generate-qr', async (req, res) => {
       return res.json({ success: false, message: 'Student not found' });
     }
 
-    const qrData = `http://localhost:3000/scan?id=${id}`;
+    const qrData = `
+https://acc-library-management-system-frontend.onrender.com/scan?id=${id}`;
     const qrBase64 = await QRCode.toDataURL(qrData);
     res.json({ success: true, qrImage: qrBase64 });
   } catch (err) {
@@ -870,5 +871,5 @@ app.delete('/api/announcements/:id', async (req, res) => {
 app.use('/api/books', booksRouter);
 
 // ===================== START SERVER =====================
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
