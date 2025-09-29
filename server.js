@@ -887,10 +887,10 @@ app.delete('/api/announcements/:id', async (req, res) => {
 });
 
 // ------------------ GET ALL LIBRARIANS ------------------
-app.get('/', async (req, res) => {
+app.get('/api/librarians', async (req, res) => {
   try {
     const [rows] = await pool.execute(
-      'SELECT id, name, email, role FROM librarians ORDER BY name ASC'
+      'SELECT id, name, email FROM librarians ORDER BY name ASC'
     );
     res.json({ success: true, librarians: rows });
   } catch (err) {
@@ -900,10 +900,10 @@ app.get('/', async (req, res) => {
 });
 
 // ------------------ ADD NEW LIBRARIAN ------------------
-app.post('/', async (req, res) => {
-  const { name, email, password, role } = req.body;
+app.post('/api/librarians', async (req, res) => {
+  const { name, email, password } = req.body;
 
-  if (!name || !email || !password || !role) {
+  if (!name || !email || !password) {
     return res.status(400).json({ success: false, message: 'Missing required fields.' });
   }
 
@@ -916,8 +916,8 @@ app.post('/', async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const [result] = await pool.execute(
-      'INSERT INTO librarians (name, email, password, role) VALUES (?, ?, ?, ?)',
-      [name, email, hashedPassword, role]
+      'INSERT INTO librarians (name, email, password) VALUES (?, ?, ?)',
+      [name, email, hashedPassword]
     );
 
     res.status(201).json({
@@ -932,7 +932,7 @@ app.post('/', async (req, res) => {
 });
 
 // ------------------ DELETE LIBRARIAN ------------------
-app.delete('/:id', async (req, res) => {
+app.delete('/api/librarians/:id', async (req, res) => {
   const librarianId = req.params.id;
 
   try {
