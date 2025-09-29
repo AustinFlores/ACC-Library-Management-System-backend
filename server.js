@@ -924,7 +924,7 @@ app.post('/api/librarians', async (req, res) => {
       message: 'Librarian added successfully.',
       librarian: { id: result.insertId, name, email, role }
     });
-  }
+  
 });
 
 
