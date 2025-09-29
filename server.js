@@ -53,7 +53,7 @@ app.post('/signin', async (req, res) => {
   }
 
   try {
-    // Check librarian first
+    // 1. Check librarian first
     const [librarians] = await db.query('SELECT * FROM librarians WHERE email = ?', [email]);
     const librarian = librarians[0];
 
@@ -63,14 +63,31 @@ app.post('/signin', async (req, res) => {
         return res.json({
           success: true,
           name: librarian.name,
-          role: librarian.role,
+          role: librarian.role, // e.g., "librarian"
         });
       } else {
         return res.json({ success: false, message: 'Invalid credentials' });
       }
     }
 
-    // Otherwise check student
+    // 2. Check admin table next
+    const [admins] = await db.query('SELECT * FROM admins WHERE email = ?', [email]);
+    const admin = admins[0];
+
+    if (admin) {
+      const isMatch = await bcrypt.compare(password, admin.password);
+      if (isMatch) {
+        return res.json({
+          success: true,
+          name: admin.name,
+          role: 'admin', // explicitly mark role as admin
+        });
+      } else {
+        return res.json({ success: false, message: 'Invalid credentials' });
+      }
+    }
+
+    // 3. Otherwise check student
     const [students] = await db.query(
       'SELECT id, name, email, course, year_level, password, role FROM students WHERE email = ?',
       [email]
@@ -84,17 +101,19 @@ app.post('/signin', async (req, res) => {
           success: true,
           name: student.name,
           studentId: student.id,
-          role: student.role || 'student'
+          role: student.role || 'student', // default to student if role missing
         });
       }
     }
 
+    // 4. If none matched
     return res.json({ success: false, message: 'Invalid credentials' });
   } catch (err) {
     console.error("Signin error:", err.message);
     res.status(500).json({ success: false, message: 'Database error' });
   }
 });
+
 
 
 
