@@ -899,15 +899,14 @@ app.get('/api/librarians', async (req, res) => {
   }
 });
 
-// ------------------ ADD NEW LIBRARIAN ------------------
 app.post('/api/librarians', async (req, res) => {
-  const { name, email, password} = req.body;
+  const { name, email, password } = req.body;
 
   if (!name || !email || !password) {
     return res.status(400).json({ success: false, message: 'Missing required fields.' });
   }
 
-  
+  try {
     const [existing] = await db.query('SELECT id FROM librarians WHERE email = ?', [email]);
     if (existing.length > 0) {
       return res.status(409).json({ success: false, message: 'Email already exists.' });
@@ -922,10 +921,14 @@ app.post('/api/librarians', async (req, res) => {
     res.status(201).json({
       success: true,
       message: 'Librarian added successfully.',
-      librarian: { id: result.insertId, name, email, role }
+      librarian: { id: result.insertId, name, email }
     });
-
+  } catch (err) {
+    console.error('Error adding librarian:', err.message);
+    res.status(500).json({ success: false, message: 'Database error adding librarian.' });
+  }
 });
+
 
 
 // ------------------ DELETE LIBRARIAN ------------------
