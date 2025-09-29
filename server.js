@@ -901,9 +901,9 @@ app.get('/api/librarians', async (req, res) => {
 
 // ------------------ ADD NEW LIBRARIAN ------------------
 app.post('/api/librarians', async (req, res) => {
-  const { name, email, password, role } = req.body; // include role
+  const { name, email, password} = req.body;
 
-  if (!name || !email || !password || !role) {
+  if (!name || !email || !password) {
     return res.status(400).json({ success: false, message: 'Missing required fields.' });
   }
 
@@ -915,8 +915,8 @@ app.post('/api/librarians', async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const [result] = await db.query(
-      'INSERT INTO librarians (name, email, password, role) VALUES (?, ?, ?, ?)',
-      [name, email, hashedPassword, role] 
+      'INSERT INTO librarians (name, email, password) VALUES (?, ?, ?)',
+      [name, email, hashedPassword] 
     );
 
     res.status(201).json({
