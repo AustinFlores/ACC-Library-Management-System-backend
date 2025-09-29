@@ -924,7 +924,10 @@ app.post('/api/librarians', async (req, res) => {
       message: 'Librarian added successfully.',
       librarian: { id: result.insertId, name, email, role }
     });
-  
+  } catch (err) {
+    console.error('Error creating librarian account:', err.message);
+    res.status(500).json({ success: false, message: 'Database error creating librarian account.' });
+  }
 });
 
 
