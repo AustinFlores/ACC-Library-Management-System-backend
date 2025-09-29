@@ -886,7 +886,66 @@ app.delete('/api/announcements/:id', async (req, res) => {
     }
 });
 
+// ------------------ GET ALL LIBRARIANS ------------------
+app.get('/', async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      'SELECT id, name, email, role FROM librarians ORDER BY name ASC'
+    );
+    res.json({ success: true, librarians: rows });
+  } catch (err) {
+    console.error('Error fetching librarians:', err.message);
+    res.status(500).json({ success: false, message: 'Database error fetching librarians.' });
+  }
+});
 
+// ------------------ ADD NEW LIBRARIAN ------------------
+app.post('/', async (req, res) => {
+  const { name, email, password, role } = req.body;
+
+  if (!name || !email || !password || !role) {
+    return res.status(400).json({ success: false, message: 'Missing required fields.' });
+  }
+
+  try {
+    // Check if email already exists
+    const [existing] = await pool.execute('SELECT id FROM librarians WHERE email = ?', [email]);
+    if (existing.length > 0) {
+      return res.status(409).json({ success: false, message: 'Email already exists.' });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const [result] = await pool.execute(
+      'INSERT INTO librarians (name, email, password, role) VALUES (?, ?, ?, ?)',
+      [name, email, hashedPassword, role]
+    );
+
+    res.status(201).json({
+      success: true,
+      message: 'Librarian added successfully.',
+      librarian: { id: result.insertId, name, email, role }
+    });
+  } catch (err) {
+    console.error('Error adding librarian:', err.message);
+    res.status(500).json({ success: false, message: 'Database error adding librarian.' });
+  }
+});
+
+// ------------------ DELETE LIBRARIAN ------------------
+app.delete('/:id', authorizeAdmin, async (req, res) => {
+  const librarianId = req.params.id;
+
+  try {
+    const [result] = await pool.execute('DELETE FROM librarians WHERE id = ?', [librarianId]);
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: 'Librarian not found.' });
+    }
+    res.json({ success: true, message: 'Librarian deleted successfully.' });
+  } catch (err) {
+    console.error('Error deleting librarian:', err.message);
+    res.status(500).json({ success: false, message: 'Database error deleting librarian.' });
+  }
+});
 
 app.use('/api/books', booksRouter);
 
