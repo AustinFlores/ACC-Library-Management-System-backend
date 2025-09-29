@@ -53,7 +53,7 @@ app.post('/signin', async (req, res) => {
   }
 
   try {
-    // Check librarian first
+    // --- Check Librarian ---
     const [librarians] = await db.query('SELECT * FROM librarians WHERE email = ?', [email]);
     const librarian = librarians[0];
 
@@ -63,14 +63,31 @@ app.post('/signin', async (req, res) => {
         return res.json({
           success: true,
           name: librarian.name,
-          role: librarian.role,
+          role: librarian.role, // e.g., 'librarian'
         });
       } else {
         return res.json({ success: false, message: 'Invalid credentials' });
       }
     }
 
-    // Otherwise check student
+    // --- Check Admin ---
+    const [admins] = await db.query('SELECT * FROM admins WHERE email = ?', [email]);
+    const admin = admins[0];
+
+    if (admin) {
+      const isMatch = await bcrypt.compare(password, admin.password);
+      if (isMatch) {
+        return res.json({
+          success: true,
+          name: admin.name,
+          role: 'admin',
+        });
+      } else {
+        return res.json({ success: false, message: 'Invalid credentials' });
+      }
+    }
+
+    // --- Check Student ---
     const [students] = await db.query(
       'SELECT id, name, email, course, year_level, password, role FROM students WHERE email = ?',
       [email]
