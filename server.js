@@ -889,7 +889,7 @@ app.delete('/api/announcements/:id', async (req, res) => {
 // ------------------ GET ALL LIBRARIANS ------------------
 app.get('/api/librarians', async (req, res) => {
   try {
-    const [rows] = await pool.execute(
+    const [rows] = await db.query(
       'SELECT id, name, email FROM librarians ORDER BY name ASC'
     );
     res.json({ success: true, librarians: rows });
@@ -909,13 +909,13 @@ app.post('/api/librarians', async (req, res) => {
 
   try {
     // Check if email already exists
-    const [existing] = await pool.execute('SELECT id FROM librarians WHERE email = ?', [email]);
+    const [existing] = await db.query('SELECT id FROM librarians WHERE email = ?', [email]);
     if (existing.length > 0) {
       return res.status(409).json({ success: false, message: 'Email already exists.' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const [result] = await pool.execute(
+    const [result] = await db.query(
       'INSERT INTO librarians (name, email, password) VALUES (?, ?, ?)',
       [name, email, hashedPassword]
     );
@@ -936,7 +936,7 @@ app.delete('/api/librarians/:id', async (req, res) => {
   const librarianId = req.params.id;
 
   try {
-    const [result] = await pool.execute('DELETE FROM librarians WHERE id = ?', [librarianId]);
+    const [result] = await db.query('DELETE FROM librarians WHERE id = ?', [librarianId]);
     if (result.affectedRows === 0) {
       return res.status(404).json({ success: false, message: 'Librarian not found.' });
     }
