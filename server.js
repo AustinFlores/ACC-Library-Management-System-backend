@@ -932,7 +932,7 @@ app.post('/', async (req, res) => {
 });
 
 // ------------------ DELETE LIBRARIAN ------------------
-app.delete('/:id', authorizeAdmin, async (req, res) => {
+app.delete('/:id', async (req, res) => {
   const librarianId = req.params.id;
 
   try {
