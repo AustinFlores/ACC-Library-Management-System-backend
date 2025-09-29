@@ -901,14 +901,13 @@ app.get('/api/librarians', async (req, res) => {
 
 // ------------------ ADD NEW LIBRARIAN ------------------
 app.post('/api/librarians', async (req, res) => {
-  const { name, email, password } = req.body;
+  const { name, email, password, role } = req.body; // include role
 
-  if (!name || !email || !password) {
+  if (!name || !email || !password || !role) {
     return res.status(400).json({ success: false, message: 'Missing required fields.' });
   }
 
   try {
-    // Check if email already exists
     const [existing] = await db.query('SELECT id FROM librarians WHERE email = ?', [email]);
     if (existing.length > 0) {
       return res.status(409).json({ success: false, message: 'Email already exists.' });
@@ -916,8 +915,8 @@ app.post('/api/librarians', async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const [result] = await db.query(
-      'INSERT INTO librarians (name, email, password) VALUES (?, ?, ?)',
-      [name, email, hashedPassword]
+      'INSERT INTO librarians (name, email, password, role) VALUES (?, ?, ?, ?)',
+      [name, email, hashedPassword, role] 
     );
 
     res.status(201).json({
@@ -930,6 +929,7 @@ app.post('/api/librarians', async (req, res) => {
     res.status(500).json({ success: false, message: 'Database error adding librarian.' });
   }
 });
+
 
 // ------------------ DELETE LIBRARIAN ------------------
 app.delete('/api/librarians/:id', async (req, res) => {
