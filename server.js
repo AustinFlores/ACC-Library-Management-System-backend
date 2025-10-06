@@ -53,7 +53,7 @@ app.post('/signin', async (req, res) => {
   }
 
   try {
-    // Check librarian first
+    // 1. Check librarian first
     const [librarians] = await db.query('SELECT * FROM librarians WHERE email = ?', [email]);
     const librarian = librarians[0];
 
@@ -63,14 +63,31 @@ app.post('/signin', async (req, res) => {
         return res.json({
           success: true,
           name: librarian.name,
-          role: librarian.role,
+          role: librarian.role, // e.g., "librarian"
         });
       } else {
         return res.json({ success: false, message: 'Invalid credentials' });
       }
     }
 
-    // Otherwise check student
+    // 2. Check admin table next
+    const [admins] = await db.query('SELECT * FROM admins WHERE email = ?', [email]);
+    const admin = admins[0];
+
+    if (admin) {
+      const isMatch = password === admin.password;
+      if (isMatch) {
+        return res.json({
+          success: true,
+          name: admin.name,
+          role: 'admin', // explicitly mark role as admin
+        });
+      } else {
+        return res.json({ success: false, message: 'Invalid credentials' });
+      }
+    }
+
+    // 3. Otherwise check student
     const [students] = await db.query(
       'SELECT id, name, email, course, year_level, password, role FROM students WHERE email = ?',
       [email]
@@ -84,17 +101,21 @@ app.post('/signin', async (req, res) => {
           success: true,
           name: student.name,
           studentId: student.id,
-          role: student.role || 'student'
+          role: student.role || 'student', // default to student if role missing
         });
       }
     }
 
+    // 4. If none matched
     return res.json({ success: false, message: 'Invalid credentials' });
   } catch (err) {
     console.error("Signin error:", err.message);
     res.status(500).json({ success: false, message: 'Database error' });
   }
 });
+
+
+
 
 // ===================== GENERATE QR (On-Demand) =====================
 app.get('/generate-qr', async (req, res) => {
@@ -108,8 +129,7 @@ app.get('/generate-qr', async (req, res) => {
       return res.json({ success: false, message: 'Student not found' });
     }
 
-    const qrData = `
-https://acc-library-management-system-frontend.onrender.com/scan?id=${id}`;
+    const qrData = `${id}`;
     const qrBase64 = await QRCode.toDataURL(qrData);
     res.json({ success: true, qrImage: qrBase64 });
   } catch (err) {
@@ -866,7 +886,66 @@ app.delete('/api/announcements/:id', async (req, res) => {
     }
 });
 
+// ------------------ GET ALL LIBRARIANS ------------------
+app.get('/api/librarians', async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      'SELECT id, name, email FROM librarians ORDER BY name ASC'
+    );
+    res.json({ success: true, librarians: rows });
+  } catch (err) {
+    console.error('Error fetching librarians:', err.message);
+    res.status(500).json({ success: false, message: 'Database error fetching librarians.' });
+  }
+});
 
+app.post('/api/librarians', async (req, res) => {
+  const { name, email, password } = req.body;
+
+  if (!name || !email || !password) {
+    return res.status(400).json({ success: false, message: 'Missing required fields.' });
+  }
+
+  try {
+    const [existing] = await db.query('SELECT id FROM librarians WHERE email = ?', [email]);
+    if (existing.length > 0) {
+      return res.status(409).json({ success: false, message: 'Email already exists.' });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const [result] = await db.query(
+      'INSERT INTO librarians (name, email, password) VALUES (?, ?, ?)',
+      [name, email, hashedPassword] 
+    );
+
+    res.status(201).json({
+      success: true,
+      message: 'Librarian added successfully.',
+      librarian: { id: result.insertId, name, email }
+    });
+  } catch (err) {
+    console.error('Error adding librarian:', err.message);
+    res.status(500).json({ success: false, message: 'Database error adding librarian.' });
+  }
+});
+
+
+
+// ------------------ DELETE LIBRARIAN ------------------
+app.delete('/api/librarians/:id', async (req, res) => {
+  const librarianId = req.params.id;
+
+  try {
+    const [result] = await db.query('DELETE FROM librarians WHERE id = ?', [librarianId]);
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: 'Librarian not found.' });
+    }
+    res.json({ success: true, message: 'Librarian deleted successfully.' });
+  } catch (err) {
+    console.error('Error deleting librarian:', err.message);
+    res.status(500).json({ success: false, message: 'Database error deleting librarian.' });
+  }
+});
 
 app.use('/api/books', booksRouter);
 

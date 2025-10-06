@@ -118,6 +118,7 @@ router.get('/categories', async (req, res) => {
   }
 });
 
+
 // --- Add New Book (POST /api/books/add) ---
 router.post('/add', async (req, res) => {
   const { title, isbn, author, category } = req.body;

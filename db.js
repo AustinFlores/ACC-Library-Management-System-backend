@@ -2,16 +2,23 @@
 const mysql = require('mysql2/promise');
 require('dotenv').config(); // Load environment variables
 
-const dbConfig = {
-  host: process.env.DB_HOST || 'localhost',
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || 'your_mysql_password', // !!! CHANGE THIS !!!
-  database: process.env.DB_NAME || 'lms_db', // Ensure this database exists in MySQL
-  waitForConnections: true,
-  connectionLimit: 10, // Adjust as needed
-  queueLimit: 0,
-  dateStrings: true
-};
+let dbConfig;
+
+if (process.env.DB_URI) {
+  dbConfig = process.env.DB_URI;
+} else {
+  // Fallback to individual env vars
+  dbConfig = {
+    host: process.env.DB_HOST || 'localhost',
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASSWORD || 'your_mysql_password',
+    database: process.env.DB_NAME || 'lms_db',
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+    dateStrings: true,
+  };
+}
 
 // Create a connection pool for the database.
 // This pool will be used globally by the application.
