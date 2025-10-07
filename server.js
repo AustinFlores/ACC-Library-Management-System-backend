@@ -75,7 +75,7 @@ app.post('/signin', async (req, res) => {
     const admin = admins[0];
 
     if (admin) {
-      const isMatch = password === admin.password;
+      const isMatch = await bcrypt.compare(password, admin.password);
       if (isMatch) {
         return res.json({
           success: true,
