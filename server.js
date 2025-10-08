@@ -493,7 +493,7 @@ app.delete('/api/students/:id', async (req, res) => {
 });
 
 // GET /api/student/borrow-requests?studentId=xxxx
-app.get('/borrow/request', async (req, res) => {
+app.get('/api/borrow/request', async (req, res) => {
 
   try {
     const [rows] = await db.query(
