@@ -492,13 +492,14 @@ app.delete('/api/students/:id', async (req, res) => {
   }
 });
 
-// GET /api/student/borrow-requests?studentId=xxxx
+//Get all borrow requests for a student
 app.get('/api/borrow/request', async (req, res) => {
   const { studentId } = req.query;
 
   try {
     const [rows] = await db.query(
-      `SELECT br.*, b.title, b.author
+      `SELECT br.*, b.title, b.author,
+      DATE_ADD(br.requested_at, INTERVAL 8 HOUR) AS requested_at
        FROM borrow_requests br
        JOIN books b ON br.book_id = b.id
        WHERE br.student_id = ? 
