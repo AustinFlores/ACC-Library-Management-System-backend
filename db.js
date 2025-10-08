@@ -22,7 +22,7 @@ if (process.env.DB_URI) {
 
 // Create a connection pool for the database.
 // This pool will be used globally by the application.
-const pool = mysql.createPool({dbConfig, timezone: '+08:00'});
+const pool = mysql.createPool(dbConfig);
 
 // Test the connection once when the module loads
 pool.getConnection()
