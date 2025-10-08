@@ -494,6 +494,7 @@ app.delete('/api/students/:id', async (req, res) => {
 
 // GET /api/student/borrow-requests?studentId=xxxx
 app.get('/api/borrow/request', async (req, res) => {
+  const { studentId } = req.query;
 
   try {
     const [rows] = await db.query(
