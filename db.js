@@ -3,7 +3,7 @@ const mysql = require('mysql2/promise');
 require('dotenv').config();
 
 let dbConfig;
-dbConfig = `${process.env.DB_URI}?timezone=%2B08%3A00`;
+dbConfig = process.env.DB_URI;
 
 // if (process.env.DB_URI) {
 //   dbConfig = process.env.DB_URI;
