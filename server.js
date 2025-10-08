@@ -80,7 +80,7 @@ app.post('/signin', async (req, res) => {
         return res.json({
           success: true,
           name: admin.name,
-          role: 'admin', // explicitly mark role as admin
+          role: 'admin',
         });
       } else {
         return res.json({ success: false, message: 'Invalid credentials' });
@@ -491,6 +491,26 @@ app.delete('/api/students/:id', async (req, res) => {
     res.status(500).json({ success: false, error: 'Database error deleting student.' });
   }
 });
+
+// GET /api/student/borrow-requests?studentId=xxxx
+app.get('/borrow/request', async (req, res) => {
+
+  try {
+    const [rows] = await db.query(
+      `SELECT br.*, b.title, b.author
+       FROM borrow_requests br
+       JOIN books b ON br.book_id = b.id
+       WHERE br.student_id = ? 
+       ORDER BY br.requested_at DESC`,
+      [studentId]
+    );
+    res.json({ success: true, requests: rows });
+  } catch (err) {
+    console.error('Error fetching borrow requests:', err);
+    res.json({ success: false, error: 'Failed to fetch borrow requests' });
+  }
+});
+
 
 
 // ===================== API for Borrow Requests =====================
