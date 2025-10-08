@@ -743,7 +743,7 @@ app.get('/api/librarian/pending-borrows', async (req, res) => {
   // TODO: Add authorization middleware for librarians here
   try {
     const [pendingRequests] = await db.query(`
-      SELECT br.id, s.name as student, b.title as book, DATE_FORMAT(br.requested_at, '%Y-%m-%d %H:%i') as requestedDate
+      SELECT br.id, s.name as student, b.title as book, DATE_FORMAT(DATE_ADD(br.requested_at, INTERVAL 8 HOUR), '%Y-%m-%d %H:%i') as requestedDate
       FROM borrow_requests br
       JOIN students s ON br.student_id = s.id
       JOIN books b ON br.book_id = b.id
