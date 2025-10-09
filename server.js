@@ -616,7 +616,7 @@ app.post('/api/librarian/borrow-requests/update-status', async (req, res) => {
 app.get('/api/bookings', async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT id, name, email, DATE_FORMAT(date, '%Y-%m-%d') AS date, timeSlot, purpose, notes, createdAt, status
+      `SELECT id, name, email, DATE_FORMAT(date, '%Y-%m-%d') AS date, timeSlot, purpose, notes, DATE_ADD(createdAt, INTERVAL 8 HOUR) AS createdAt, status
        FROM bookings 
        ORDER BY createdAt DESC`
     );
