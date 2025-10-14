@@ -206,7 +206,7 @@ app.post('/api/attendance/toggle', async (req, res) => {
 
     try {
         // 1. Validate Student Existence and Get Name
-        const studentSql = `SELECT id, name FROM Students WHERE id = ?`;
+        const studentSql = `SELECT id, name FROM students WHERE id = ?`;
         const [studentRows] = await db.query(studentSql, [student_id]);
         const student = studentRows[0];
         
