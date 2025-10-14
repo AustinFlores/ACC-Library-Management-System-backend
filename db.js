@@ -13,7 +13,6 @@ if (process.env.DB_URI) {
     user: process.env.DB_USER || 'root',
     password: process.env.DB_PASSWORD || '123',
     database: process.env.DB_NAME || 'lms_db',
-    port: process.env.DB_PORT ? parseInt(process.env.DB_PORT) : 3306,
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0,
