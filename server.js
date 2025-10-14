@@ -159,21 +159,30 @@ app.get('/verify', async (req, res) => {
   }
 });
 
-// GET /api/attendance/occupancy
+// ==============================================================================
+// GET Current Occupancy Route
+// ==============================================================================
+
 app.get('/api/attendance/occupancy', async (req, res) => {
+    // Assuming MAX_CAPACITY is defined globally or imported
     const MAX_CAPACITY = 15; 
     
     try {
-        // --- 1. Find the count of active sessions ---
-        // Active session means a student has entered but not yet exited.
-        // (In SQL: SELECT COUNT(*) FROM AttendanceLog WHERE exit_timestamp IS NULL)
-        const currentCount = await AttendanceLog.count({ 
-            where: { exit_timestamp: null } 
-        });
+        const sql = `
+            SELECT COUNT(*) AS currentCount
+            FROM AttendanceLog
+            WHERE exit_timestamp IS NULL;
+        `;
+        
+        // Execute the query. We expect the result to be an array/set of rows.
+        const [rows] = await db.query(sql); 
+        
+        // Extract the count. Assumes row structure { currentCount: N }
+        const currentCount = rows[0]?.currentCount || 0; 
 
         return res.json({ 
             success: true, 
-            count: currentCount,
+            count: parseInt(currentCount), // Ensure it's returned as an integer
             max_capacity: MAX_CAPACITY
         });
         
@@ -184,7 +193,10 @@ app.get('/api/attendance/occupancy', async (req, res) => {
 });
 
 
-// POST /api/attendance/toggle
+// ==============================================================================
+// POST Toggle Attendance Route
+// ==============================================================================
+
 app.post('/api/attendance/toggle', async (req, res) => {
     const { student_id, max_capacity } = req.body;
     
@@ -193,63 +205,81 @@ app.post('/api/attendance/toggle', async (req, res) => {
     }
 
     try {
-        // 1. Validate Student Existence
-        const student = await Student.findOne({ where: { id: student_id } });
+        // 1. Validate Student Existence and Get Name
+        const studentSql = `SELECT id, name FROM Students WHERE id = ?`;
+        const [studentRows] = await db.query(studentSql, [student_id]);
+        const student = studentRows[0];
+        
         if (!student) {
             return res.status(404).json({ success: false, message: `Student ID ${student_id} not found.` });
         }
+        
+        const studentName = student.name;
 
         // 2. Check for Active Entry (Is the student currently inside?)
-        const activeEntry = await AttendanceLog.findOne({
-            where: { student_id, exit_timestamp: null }
-        });
+        const activeEntrySql = `
+            SELECT id FROM AttendanceLog
+            WHERE student_id = ? AND exit_timestamp IS NULL;
+        `;
+        const [activeEntryRows] = await db.query(activeEntrySql, [student_id]);
+        const activeEntry = activeEntryRows.length > 0;
 
-        let currentOccupancy;
+        // 3. Get Current Occupancy Count (Needed for check-in logic)
+        const countSql = `SELECT COUNT(*) AS currentOccupancy FROM AttendanceLog WHERE exit_timestamp IS NULL;`;
+        const [countRows] = await db.query(countSql);
+        const currentOccupancy = parseInt(countRows[0]?.currentOccupancy || 0);
+        
         
         if (activeEntry) {
             // ================== CHECK-OUT (EXIT) ==================
-            activeEntry.exit_timestamp = new Date();
-            await activeEntry.save();
             
-            // Recalculate occupancy after check-out
-            currentOccupancy = await AttendanceLog.count({ where: { exit_timestamp: null } });
+            const updateSql = `
+                UPDATE AttendanceLog
+                SET exit_timestamp = CURRENT_TIMESTAMP
+                WHERE student_id = ? AND exit_timestamp IS NULL;
+            `;
+            await db.query(updateSql, [student_id]);
+            
+            // Occupancy calculation for response
+            const newOccupancy = currentOccupancy - 1; 
 
             return res.json({
                 success: true,
                 action: "Checked Out",
-                studentName: student.name,
-                newOccupancy: currentOccupancy,
-                message: `${student.name} successfully checked out.`
+                studentName: studentName,
+                newOccupancy: newOccupancy,
+                message: `${studentName} successfully checked out.`
             });
 
         } else {
             // ================== CHECK-IN (ENTRY) ==================
             
-            // 3. Check Capacity
-            currentOccupancy = await AttendanceLog.count({ where: { exit_timestamp: null } });
-            
+            // 4. Check Capacity
             if (currentOccupancy >= max_capacity) {
                 return res.status(403).json({
                     success: false,
-                    message: `Library is at maximum capacity (${currentOccupancy}/${max_capacity}). Entry denied.`
+                    message: `Library is at maximum capacity (${currentOccupancy}/${max_capacity}). Entry denied.`,
+                    newOccupancy: currentOccupancy 
                 });
             }
 
-            // 4. Create New Check-In Record
-            await AttendanceLog.create({
-                student_id: student.id,
-                entry_timestamp: new Date(),
-                type: 'Walk-in' // Assumes this interface handles all physical entries
-            });
+            // 5. Create New Check-In Record
+            const insertSql = `
+                INSERT INTO AttendanceLog (student_id, visit_type)
+                VALUES (?, 'Walk-in');
+            `;
+            // Note: If you have appointment tracking, you might need logic here 
+            // to determine if 'Walk-in' or 'Appointment' should be used.
+            await db.query(insertSql, [student_id]);
             
             const newOccupancy = currentOccupancy + 1;
 
             return res.json({
                 success: true,
                 action: "Checked In",
-                studentName: student.name,
+                studentName: studentName,
                 newOccupancy: newOccupancy,
-                message: `${student.name} successfully checked in. Welcome!`
+                message: `${studentName} successfully checked in. Welcome!`
             });
         }
     } catch (error) {
