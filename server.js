@@ -159,6 +159,105 @@ app.get('/verify', async (req, res) => {
   }
 });
 
+// GET /api/attendance/occupancy
+app.get('/api/attendance/occupancy', async (req, res) => {
+    const MAX_CAPACITY = 15; 
+    
+    try {
+        // --- 1. Find the count of active sessions ---
+        // Active session means a student has entered but not yet exited.
+        // (In SQL: SELECT COUNT(*) FROM AttendanceLog WHERE exit_timestamp IS NULL)
+        const currentCount = await AttendanceLog.count({ 
+            where: { exit_timestamp: null } 
+        });
+
+        return res.json({ 
+            success: true, 
+            count: currentCount,
+            max_capacity: MAX_CAPACITY
+        });
+        
+    } catch (error) {
+        console.error('Error fetching occupancy:', error);
+        return res.status(500).json({ success: false, message: 'Server error while fetching occupancy.' });
+    }
+});
+
+
+// POST /api/attendance/toggle
+app.post('/api/attendance/toggle', async (req, res) => {
+    const { student_id, max_capacity } = req.body;
+    
+    if (!student_id || max_capacity === undefined) {
+        return res.status(400).json({ success: false, message: "Missing student ID or max capacity." });
+    }
+
+    try {
+        // 1. Validate Student Existence
+        const student = await Student.findOne({ where: { id: student_id } });
+        if (!student) {
+            return res.status(404).json({ success: false, message: `Student ID ${student_id} not found.` });
+        }
+
+        // 2. Check for Active Entry (Is the student currently inside?)
+        const activeEntry = await AttendanceLog.findOne({
+            where: { student_id, exit_timestamp: null }
+        });
+
+        let currentOccupancy;
+        
+        if (activeEntry) {
+            // ================== CHECK-OUT (EXIT) ==================
+            activeEntry.exit_timestamp = new Date();
+            await activeEntry.save();
+            
+            // Recalculate occupancy after check-out
+            currentOccupancy = await AttendanceLog.count({ where: { exit_timestamp: null } });
+
+            return res.json({
+                success: true,
+                action: "Checked Out",
+                studentName: student.name,
+                newOccupancy: currentOccupancy,
+                message: `${student.name} successfully checked out.`
+            });
+
+        } else {
+            // ================== CHECK-IN (ENTRY) ==================
+            
+            // 3. Check Capacity
+            currentOccupancy = await AttendanceLog.count({ where: { exit_timestamp: null } });
+            
+            if (currentOccupancy >= max_capacity) {
+                return res.status(403).json({
+                    success: false,
+                    message: `Library is at maximum capacity (${currentOccupancy}/${max_capacity}). Entry denied.`
+                });
+            }
+
+            // 4. Create New Check-In Record
+            await AttendanceLog.create({
+                student_id: student.id,
+                entry_timestamp: new Date(),
+                type: 'Walk-in' // Assumes this interface handles all physical entries
+            });
+            
+            const newOccupancy = currentOccupancy + 1;
+
+            return res.json({
+                success: true,
+                action: "Checked In",
+                studentName: student.name,
+                newOccupancy: newOccupancy,
+                message: `${student.name} successfully checked in. Welcome!`
+            });
+        }
+    } catch (error) {
+        console.error('Error toggling attendance:', error);
+        return res.status(500).json({ success: false, message: 'Internal server error.' });
+    }
+});
+
 // ===================== API for Student Dashboard Stats =====================
 app.get('/api/student/dashboard-stats', async (req, res) => {
   const { studentId } = req.query;
