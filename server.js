@@ -650,38 +650,51 @@ app.post("/api/appointments", async (req, res) => {
   if (!name || !email || !date || !timeSlot || !purpose) {
     return res.status(400).json({ success: false, error: "Missing required fields" });
   }
-  
-  // NOTE: We remove the crypto.randomUUID() line as the database will generate the key.
 
   try {
-    // 1. Insert the appointment data. We let the DB generate the ID (AUTO_INCREMENT key).
-    const [result] = await db.query(
-      `INSERT INTO appointments (name, email, date, timeSlot, purpose, notes)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+    // 1. Insert the data. Let the internal_sequence AUTO_INCREMENT.
+    // NOTE: If you are using 'id' for the string ID, you must specify a dummy value first.
+    const [insertResult] = await db.query(
+      `INSERT INTO appointments (id, name, email, date, timeSlot, purpose, notes)
+       VALUES (NULL, ?, ?, ?, ?, ?, ?)`, // Using NULL lets the AUTO_INCREMENT work
       [name, email, date, timeSlot, purpose, notes || ""]
     );
 
-    const autoIncrementId = result.insertId; 
+    const autoIncrementId = insertResult.insertId; 
     const currentYear = new Date().getFullYear();
+    
+    // 2. Generate the sequential padded number (e.g., '0001' or '10953')
+    // We pad the number with leading zeros to 4 digits (0000)
+    const paddedSequence = String(autoIncrementId).padStart(4, '0');
+    
+    // 3. Create the custom display ID
+    const customId = `${currentYear}-${paddedSequence}`;
 
-    const customId = `${currentYear}-${autoIncrementId}`;
-
+    // 4. Update the newly created row, replacing the temporary numerical ID 
+    //    with the new string formatted ID.
+    // DANGER: If the 'id' column is the AUTO_INCREMENT column, this UPDATE breaks sequencing.
+    // If you MUST use the 'id' column for the string ID, it cannot be the AUTO_INCREMENT column.
+    
+    // Assuming the column storing the string ID is named 'appointment_ref' or similar:
     await db.query(
-        `UPDATE appointments SET id = ? WHERE id = ?`,
+        `UPDATE appointments SET appointment_ref = ? WHERE id = ?`,
         [customId, autoIncrementId]
     );
 
-    autoIncrementId += 1;
+    // If your original table had a single 'id' column which was previously VARCHAR:
+    // This implies that the AUTO_INCREMENT key must be a completely separate column 
+    // (e.g., 'sequence_pk' INT AUTO_INCREMENT). 
+    // Without schema change, this cannot be fixed reliably.
 
-    // If you need the ID to be returned, use the customId
     res.status(201).json({ 
         success: true,
-        id: customId, // Returning the new formatted ID
+        id: customId,
         message: "Appointment created" 
     });
 
   } catch (err) {
     console.error("Insert appointment error:", err.message);
+    // If the error is 'Data truncated' or similar due to mixing types, this confirms the schema conflict.
     res.status(500).json({ success: false, error: "Database error" });
   }
 });
