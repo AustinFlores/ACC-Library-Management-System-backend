@@ -12,6 +12,12 @@ app.use(cors());
 
 const SALT_ROUNDS = 10;
 
+// Generate random password
+function generateRandomPassword(length = 10) {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%';
+  return Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+}
+
 // ===================== SIGNUP =====================
 app.post('/signup', async (req, res) => {
   const { id, name, email, grade_level, password } = req.body;
@@ -114,7 +120,53 @@ app.post('/signin', async (req, res) => {
   }
 });
 
+app.post('/api/forgot-password', async (req, res) => {
+  const { email } = req.body;
 
+  try {
+    // Check if email exists
+    const [user] = await db.query('SELECT * FROM users WHERE email = ?', [email]);
+    if (user.length === 0) {
+      return res.json({ success: false, message: 'Email not found' });
+    }
+
+    // Generate new random password
+    const newPassword = generateRandomPassword();
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update user password
+    await db.query('UPDATE users SET password = ? WHERE email = ?', [hashedPassword, email]);
+
+    // Configure email
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.EMAIL_USER, // your Gmail
+        pass: process.env.EMAIL_PASS, // app password
+      },
+    });
+
+    const mailOptions = {
+      from: `"Library System" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: 'Password Reset Request',
+      html: `
+        <p>Hello,</p>
+        <p>Your password has been reset. Use this new temporary password to log in:</p>
+        <h3>${newPassword}</h3>
+        <p>Please change it immediately after logging in for security.</p>
+      `,
+    };
+
+    // Send email
+    await transporter.sendMail(mailOptions);
+
+    res.json({ success: true, message: 'New password sent to your email' });
+  } catch (err) {
+    console.error(err);
+    res.json({ success: false, message: 'An error occurred while resetting password' });
+  }
+});
 
 
 // ===================== GENERATE QR (On-Demand) =====================
