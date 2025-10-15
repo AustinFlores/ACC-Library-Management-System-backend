@@ -653,25 +653,31 @@ app.post("/api/appointments", async (req, res) => {
   }
 
   try {
-    // 1. Insert the appointment data. Use NULL for the 'id' column to trigger AUTO_INCREMENT.
-    // NOTE: This assumes 'id' is defined as INT PRIMARY KEY AUTO_INCREMENT.
+    // 1. Insert the data. Insert NULL into sequence_id (the AUTO_INCREMENT key)
+    // and NULL into id (the VARCHAR column we will update).
+    // Ensure the column order matches your table structure EXACTLY after the ALTER TABLE.
+    
+    // Assuming the new order is (sequence_id, id, name, email, date, timeSlot, purpose, notes, status)
     const [insertResult] = await db.query(
-      `INSERT INTO appointments (id, name, email, date, timeSlot, purpose, notes, status)
-       VALUES (NULL, ?, ?, ?, ?, ?, ?, 'Pending')`, // Added status='Pending' as status column exists
+      `INSERT INTO appointments (sequence_id, id, name, email, date, timeSlot, purpose, notes, status)
+       VALUES (NULL, NULL, ?, ?, ?, ?, ?, ?, 'Pending')`, 
       [name, email, date, timeSlot, purpose, notes || ""]
     );
 
-    const autoIncrementId = insertResult.insertId; 
+    const autoIncrementId = insertResult.insertId; // This refers to the value of sequence_id
     const currentYear = new Date().getFullYear();
     
-    // 2. Generate the sequential padded number (e.g., '0001', '10953')
-    // Padding to 4 digits for '0000' format (e.g., 1 -> 0001)
+    // 2. Format the ID
     const paddedSequence = String(autoIncrementId).padStart(4, '0');
-    
-    // 3. Create the custom display ID (e.g., '2025-0001')
     const customId = `${currentYear}-${paddedSequence}`;
 
-    // 4. Send the formatted ID back to the client. NO DATABASE UPDATE REQUIRED.
+    // 3. Update the 'id' (VARCHAR) column using the stable sequence_id key.
+    await db.query(
+        `UPDATE appointments SET id = ? WHERE sequence_id = ?`,
+        [customId, autoIncrementId]
+    );
+
+    // 4. Send the formatted ID back.
     res.status(201).json({ 
         success: true,
         id: customId,
