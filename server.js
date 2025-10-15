@@ -140,7 +140,7 @@ app.post('/api/forgot-password', async (req, res) => {
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
     // Update password in DB
-    await db.query('UPDATE users SET password = ? WHERE email = ?', [hashedPassword, email]);
+    await db.query('UPDATE students SET password = ? WHERE email = ?', [hashedPassword, email]);
 
     // Configure email
     const transporter = nodemailer.createTransport({
