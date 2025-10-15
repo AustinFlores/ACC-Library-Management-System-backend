@@ -316,7 +316,7 @@ app.get('/api/student/dashboard-stats', async (req, res) => {
 
     // Count active (pending or confirmed) appointments for this student
     const activeAppointments = await getCount(
-      'SELECT COUNT(*) FROM appointments WHERE email = (SELECT email FROM students WHERE id = ?)',
+      'SELECT COUNT(*) FROM appointments WHERE email = (SELECT email FROM students WHERE id = ?) && (status = "pending" OR status = "confirmed")',
       [studentId]
     );
 
