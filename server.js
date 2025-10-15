@@ -123,26 +123,30 @@ app.post('/signin', async (req, res) => {
 app.post('/api/forgot-password', async (req, res) => {
   const { email } = req.body;
 
+  if (!email) return res.json({ success: false, message: 'Email is required' });
+
   try {
-    // Check if email exists
-    const [user] = await db.query('SELECT * FROM users WHERE email = ?', [email]);
-    if (user.length === 0) {
+    const [rows] = await db.query('SELECT * FROM users WHERE email = ?', [email]);
+
+    if (rows.length === 0) {
       return res.json({ success: false, message: 'Email not found' });
     }
 
-    // Generate new random password
+    const user = rows[0];
+
+    // Generate new password
     const newPassword = generateRandomPassword();
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    // Update user password
+    // Update password in DB
     await db.query('UPDATE users SET password = ? WHERE email = ?', [hashedPassword, email]);
 
     // Configure email
     const transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: {
-        user: process.env.EMAIL_USER, // your Gmail
-        pass: process.env.EMAIL_PASS, // app password
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS, // Use App Password
       },
     });
 
@@ -151,8 +155,8 @@ app.post('/api/forgot-password', async (req, res) => {
       to: email,
       subject: 'Password Reset Request',
       html: `
-        <p>Hello,</p>
-        <p>Your password has been reset. Use this new temporary password to log in:</p>
+        <p>Hello ${user.name},</p>
+        <p>Your password has been reset. Use this temporary password to log in:</p>
         <h3>${newPassword}</h3>
         <p>Please change it immediately after logging in for security.</p>
       `,
@@ -161,10 +165,10 @@ app.post('/api/forgot-password', async (req, res) => {
     // Send email
     await transporter.sendMail(mailOptions);
 
-    res.json({ success: true, message: 'New password sent to your email' });
+    res.json({ success: true, message: 'A new password has been sent to your email.' });
   } catch (err) {
-    console.error(err);
-    res.json({ success: false, message: 'An error occurred while resetting password' });
+    console.error('Forgot password error:', err); // Detailed server-side logging
+    res.json({ success: false, message: err.message || 'An error occurred while resetting password' });
   }
 });
 
