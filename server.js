@@ -787,17 +787,39 @@ app.post('/api/librarian/borrow-requests/update-status', async (req, res) => {
 app.get('/api/appointments', async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT id, name, email, DATE_FORMAT(date, '%Y-%m-%d') AS date, timeSlot, purpose, notes, DATE_ADD(createdAt, INTERVAL 8 HOUR) AS createdAt, status
+      `SELECT id, name, email, DATE_FORMAT(date, '%Y-%m-%d') AS date, timeSlot, purpose, notes, 
+              DATE_ADD(createdAt, INTERVAL 8 HOUR) AS createdAt, status
        FROM appointments
        ORDER BY createdAt DESC`
     );
 
-    res.json({ success: true, appointments: rows || [] });
+    const now = new Date();
+
+    const updatedAppointments = rows.map(appointment => {
+      const { date, timeSlot } = appointment;
+
+      // Extract the end time (after '-')
+      const endTimeStr = timeSlot?.split('-')[1]?.trim(); // e.g., "11:00 AM"
+      if (!endTimeStr) return appointment;
+
+      // Combine date + end time into a single Date object
+      const endDateTime = new Date(`${date} ${endTimeStr}`);
+
+      // If the end time has passed, mark as completed
+      if (endDateTime < now && appointment.status.toLowerCase() !== 'completed') {
+        appointment.status = 'completed';
+      }
+
+      return appointment;
+    });
+
+    res.json({ success: true, appointments: updatedAppointments || [] });
   } catch (err) {
     console.error("Fetch appointments error:", err.message);
     res.status(500).json({ success: false, error: 'Database error fetching appointments.' });
   }
 });
+
 
 // Update appointment status
 app.post('/api/appointments/update-status', async (req, res) => {
