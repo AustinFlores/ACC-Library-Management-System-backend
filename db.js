@@ -4,21 +4,10 @@ require('dotenv').config();
 
 let dbConfig;
 
-if (process.env.DB_URI) {
-  dbConfig = process.env.DB_URI;
-} else {
-  // Fallback to individual env vars
-  dbConfig = {
-    host: process.env.DB_HOST || 'localhost',
-    user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASSWORD || '123',
-    database: process.env.DB_NAME || 'lms_db',
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0,
-    dateStrings: true,
-  };
+if (process.env.DATABASE_URL) {
+  dbConfig = { uri: process.env.DATABASE_URL };
 }
+
 
 // Create a connection pool for the database.
 // This pool will be used globally by the application.
