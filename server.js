@@ -142,21 +142,41 @@ app.get('/generate-qr', async (req, res) => {
 app.post('/verify-password', async (req, res) => {
   const { id, password } = req.body;
 
-  db.query('SELECT password FROM students WHERE id = ?', [id], async (err, results) => {
-    if (err) {
-      console.error("Database error:", err);
-      return res.status(500).json({ success: false, message: 'Database error' });
+  if (!id || !password) {
+    return res.status(400).json({ success: false, message: 'Student ID and password are required.' });
+  }
+
+  try {
+    const [rows] = await db.query(
+      'SELECT id, name, email, password FROM students WHERE id = ?',
+      [id]
+    );
+
+    if (rows.length === 0) {
+      return res.json({ success: false, message: 'User not found.' });
     }
 
-    if (results.length === 0) {
-      return res.json({ success: false, message: "User not found" });
+    const user = rows[0];
+    const isMatch = await bcrypt.compare(password, user.password);
+
+    if (!isMatch) {
+      return res.json({ success: false, message: 'Incorrect password.' });
     }
 
-    const user = results[0];
-    const match = await bcrypt.compare(password, user.password);
-    if (!match) return res.json({ success: false, message: "Incorrect password" });
-    return res.json({ success: true, user });
+    // Return only safe fields
+    res.json({
+      success: true,
+      message: 'Password verified successfully.',
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email
+      }
     });
+  } catch (err) {
+    console.error('Verify-password error:', err.message);
+    res.status(500).json({ success: false, message: 'Database error verifying password.' });
+  }
 });
 
 // ===================== VERIFY (Using Student ID) =====================
