@@ -660,7 +660,7 @@ app.post("/api/appointments", async (req, res) => {
     // Assuming the new order is (sequence_id, id, name, email, date, timeSlot, purpose, notes, status)
     const [insertResult] = await db.query(
       `INSERT INTO appointments (sequence_id, id, name, email, date, timeSlot, purpose, notes, status)
-       VALUES (NULL, NULL, ?, ?, ?, ?, ?, ?, 'Pending')`, 
+       VALUES (NULL, 'TEMP_ID', ?, ?, ?, ?, ?, ?, 'Pending')`, 
       [name, email, date, timeSlot, purpose, notes || ""]
     );
 
