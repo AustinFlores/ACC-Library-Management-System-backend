@@ -148,7 +148,7 @@ app.post('/verify-password', async (req, res) => {
 
   try {
     const [rows] = await db.query(
-      'SELECT id, name, email, password FROM students WHERE id = ?',
+      'SELECT id, name, email, password, role FROM students WHERE id = ?',
       [id]
     );
 
