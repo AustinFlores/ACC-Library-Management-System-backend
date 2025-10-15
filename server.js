@@ -143,14 +143,18 @@ app.post('/api/forgot-password', async (req, res) => {
     // Update password in DB
     await db.query('UPDATE students SET password = ? WHERE email = ?', [hashedPassword, email]);
 
-    // Configure email
+
     const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS, // Use App Password
-      },
-    });
+  host: 'smtp.gmail.com',
+  port: 465, // Use 465 for secure connection (SSL/TLS)
+  secure: true, // Use true for port 465, false for other ports like 587
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+
+  timeout: 10000, 
+});
 
     const mailOptions = {
       from: `"Library System" <${process.env.EMAIL_USER}>`,
