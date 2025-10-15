@@ -14,7 +14,7 @@ const SALT_ROUNDS = 10;
 
 // ===================== SIGNUP =====================
 app.post('/signup', async (req, res) => {
-  const { id, name, email, course, year_level, password } = req.body;
+  const { id, name, email, grade_level, password } = req.body;
 
   try {
     const [existing] = await db.query(
@@ -29,9 +29,9 @@ app.post('/signup', async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
 
     await db.query(
-      `INSERT INTO students (id, name, email, course, year_level, password)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [id, name, email, course, year_level, hashedPassword]
+      `INSERT INTO students (id, name, email, grade_level, password)
+       VALUES (?, ?, ?, ?, ?)`,
+      [id, name, email, grade_level, hashedPassword]
     );
 
     res.json({
@@ -89,7 +89,7 @@ app.post('/signin', async (req, res) => {
 
     // 3. Otherwise check student
     const [students] = await db.query(
-      'SELECT id, name, email, course, year_level, password, role FROM students WHERE email = ?',
+      'SELECT id, name, email, grade_level, password, role FROM students WHERE email = ?',
       [email]
     );
     const student = students[0];
@@ -145,7 +145,7 @@ app.get('/verify', async (req, res) => {
 
   try {
     const [rows] = await db.query(
-      'SELECT id, name, email, course, year_level, password, role FROM students WHERE id = ?',
+      'SELECT id, name, email, grade_level, password, role FROM students WHERE id = ?',
       [id]
     );
     const student = rows[0];
@@ -314,9 +314,9 @@ app.get('/api/student/dashboard-stats', async (req, res) => {
       [studentId]
     );
 
-    // Count active (pending or confirmed) appointments for this student
+    // Count active (pending or completed) appointments for this student
     const activeAppointments = await getCount(
-      'SELECT COUNT(*) FROM appointments WHERE email = (SELECT email FROM students WHERE id = ?) && (status = "pending" OR status = "confirmed")',
+      'SELECT COUNT(*) FROM appointments WHERE email = (SELECT email FROM students WHERE id = ?) && (status = "pending" OR status = "completed")',
       [studentId]
     );
 
@@ -469,7 +469,7 @@ app.get('/api/student/appointments', async (req, res) => {
       `SELECT 
         id, date, timeSlot, purpose, status, createdAt
        FROM appointments
-       WHERE email = ? AND (status = 'pending' OR status = 'confirmed')
+       WHERE email = ? AND (status = 'pending' OR status = 'completed')
        ORDER BY date ASC, timeSlot ASC`,
       [studentEmail]
     );
@@ -492,7 +492,7 @@ app.post('/api/appointments/cancel', async (req, res) => {
 
   try {
     const [result] = await db.query(
-      "UPDATE appointments SET status = 'cancelled' WHERE id = ? AND (status = 'Pending' OR status = 'confirmed')",
+      "UPDATE appointments SET status = 'cancelled' WHERE id = ? AND status = 'pending'",
       [appointmentId]
     );
 
@@ -589,7 +589,7 @@ app.post("/api/contact", async (req, res) => {
 app.get('/api/students', async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT id, name, email, course, year_level, password, role
+      `SELECT id, name, email, grade_level, password, role
        FROM students
        ORDER BY id ASC`
     );
@@ -764,7 +764,7 @@ app.post('/api/appointments/update-status', async (req, res) => {
   if (!appointmentId || !newStatus) {
     return res.status(400).json({ success: false, message: 'Missing appointment ID or new status.' });
   }
-  if (!['Pending', 'Confirmed', 'Cancelled'].includes(newStatus)) {
+  if (!['Pending', 'Completed', 'Cancelled'].includes(newStatus)) {
     return res.status(400).json({ success: false, message: 'Invalid status provided.' });
   }
 
