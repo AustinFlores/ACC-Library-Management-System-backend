@@ -126,7 +126,8 @@ app.post('/api/forgot-password', async (req, res) => {
   if (!email) return res.json({ success: false, message: 'Email is required' });
 
   try {
-    const [rows] = await db.query('SELECT * FROM users WHERE email = ?', [email]);
+    // Correctly destructure rows for MySQL2
+    const [rows] = await db.query('SELECT * FROM students WHERE email = ?', [email]);
 
     if (rows.length === 0) {
       return res.json({ success: false, message: 'Email not found' });
