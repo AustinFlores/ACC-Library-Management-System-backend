@@ -138,6 +138,27 @@ app.get('/generate-qr', async (req, res) => {
   }
 });
 
+// ===================== VERIFY PASSWORD =====================
+app.post('/verify-password', async (req, res) => {
+  const { id, password } = req.body;
+
+  db.query('SELECT password FROM students WHERE id = ?', [id], async (err, results) => {
+    if (err) {
+      console.error("Database error:", err);
+      return res.status(500).json({ success: false, message: 'Database error' });
+    }
+
+    if (results.length === 0) {
+      return res.json({ success: false, message: "User not found" });
+    }
+
+    const user = results[0];
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) return res.json({ success: false, message: "Incorrect password" });
+    return res.json({ success: true, user });
+    });
+});
+
 // ===================== VERIFY (Using Student ID) =====================
 app.get('/verify', async (req, res) => {
   const { id } = req.query;
