@@ -314,9 +314,9 @@ app.get('/api/student/dashboard-stats', async (req, res) => {
       [studentId]
     );
 
-    // Count active (pending or confirmed) bookings for this student
-    const activeBookings = await getCount(
-      'SELECT COUNT(*) FROM bookings WHERE email = (SELECT email FROM students WHERE id = ?)',
+    // Count active (pending or confirmed) appointments for this student
+    const activeAppointments = await getCount(
+      'SELECT COUNT(*) FROM appointments WHERE email = (SELECT email FROM students WHERE id = ?)',
       [studentId]
     );
 
@@ -324,7 +324,7 @@ app.get('/api/student/dashboard-stats', async (req, res) => {
       success: true,
       booksOnLoan,
       overdueBooks,
-      activeBookings,
+      activeAppointments,
     });
 
   } catch (err) {
@@ -456,62 +456,62 @@ app.get('/api/student/overdue-books', async (req, res) => {
   }
 });
 
-// ===================== API for Student's Active Bookings =====================
-app.get('/api/student/bookings', async (req, res) => {
+// ===================== API for Student's Active Appointments =====================
+app.get('/api/student/appointments', async (req, res) => {
   const { studentEmail } = req.query;
 
   if (!studentEmail) {
-    return res.status(400).json({ success: false, message: 'Student email is required to fetch bookings.' });
+    return res.status(400).json({ success: false, message: 'Student email is required to fetch appointments.' });
   }
 
   try {
-    const [bookings] = await db.query(
+    const [appointments] = await db.query(
       `SELECT 
         id, date, timeSlot, purpose, status, createdAt
-       FROM bookings 
+       FROM appointments
        WHERE email = ? AND (status = 'pending' OR status = 'confirmed')
        ORDER BY date ASC, timeSlot ASC`,
       [studentEmail]
     );
-    
-    res.json({ success: true, bookings: bookings || [] });
+
+    res.json({ success: true, appointments: appointments || [] });
   } catch (err) {
-    console.error("Error fetching student's bookings", studentEmail, ":", err.message);
-    res.status(500).json({ success: false, error: 'Database error fetching student bookings.' });
+    console.error("Error fetching student's appointments", studentEmail, ":", err.message);
+    res.status(500).json({ success: false, error: 'Database error fetching student appointments.' });
   }
 });
 
 
-// ===================== API for Cancelling Student Booking =====================
-app.post('/api/bookings/cancel', async (req, res) => {
-  const { bookingId } = req.body;
+// ===================== API for Cancelling Student Appointment =====================
+app.post('/api/appointments/cancel', async (req, res) => {
+  const { appointmentId } = req.body;
 
-  if (!bookingId) {
-    return res.status(400).json({ success: false, message: 'Booking ID is required to cancel a booking.' });
+  if (!appointmentId) {
+    return res.status(400).json({ success: false, message: 'Appointment ID is required to cancel an appointment.' });
   }
 
   try {
     const [result] = await db.query(
-      "UPDATE bookings SET status = 'cancelled' WHERE id = ? AND (status = 'Pending' OR status = 'confirmed')",
-      [bookingId]
+      "UPDATE appointments SET status = 'cancelled' WHERE id = ? AND (status = 'Pending' OR status = 'confirmed')",
+      [appointmentId]
     );
 
     if (result.affectedRows === 0) {
       // Check if it was already cancelled or not found
-      const [bookingCheck] = await db.query('SELECT request_status FROM bookings WHERE id = ?', [bookingId]);
-      if (bookingCheck.length === 0) {
-          return res.status(404).json({ success: false, message: 'Booking not found.' });
-      } else if (bookingCheck[0].request_status === 'Cancelled') {
-          return res.status(400).json({ success: false, message: 'Booking already cancelled.' });
+      const [appointmentCheck] = await db.query('SELECT request_status FROM appointments WHERE id = ?', [appointmentId]);
+      if (appointmentCheck.length === 0) {
+          return res.status(404).json({ success: false, message: 'Appointment not found.' });
+      } else if (appointmentCheck[0].request_status === 'Cancelled') {
+          return res.status(400).json({ success: false, message: 'Appointment already cancelled.' });
       } else {
-          return res.status(400).json({ success: false, message: 'Booking cannot be cancelled in its current state.' });
+          return res.status(400).json({ success: false, message: 'Appointment cannot be cancelled in its current state.' });
       }
     }
-    
-    res.json({ success: true, message: 'Booking cancelled successfully.' });
+
+    res.json({ success: true, message: 'Appointment cancelled successfully.' });
   } catch (err) {
-    console.error("Error cancelling booking:", err.message);
-    res.status(500).json({ success: false, error: 'Database error while cancelling booking.' });
+    console.error("Error cancelling appointment:", err.message);
+    res.status(500).json({ success: false, error: 'Database error while cancelling appointment.' });
   }
 });
 
@@ -526,7 +526,7 @@ app.get('/api/librarian/stats', async (req, res) => {
     const totalBooks = await getCount('SELECT COUNT(*) FROM books');
     const borrowedBooks = await getCount('SELECT COUNT(*) FROM books WHERE status = "Borrowed"');
     const activeStudents = await getCount('SELECT COUNT(*) FROM students');
-    const visitsToday = await getCount('SELECT COUNT(*) FROM bookings WHERE date = CURDATE()');
+    const visitsToday = await getCount('SELECT COUNT(*) FROM appointments WHERE date = CURDATE()');
 
     res.json({
       totalBooks,
@@ -540,8 +540,8 @@ app.get('/api/librarian/stats', async (req, res) => {
   }
 });
 
-// ===================== BOOKINGS =====================
-app.post("/api/bookings", async (req, res) => {
+// ===================== APPOINTMENTS =====================
+app.post("/api/appointments", async (req, res) => {
   const { name, email, date, timeSlot, purpose, notes } = req.body || {};
   if (!name || !email || !date || !timeSlot || !purpose) {
     return res.status(400).json({ error: "Missing required fields" });
@@ -551,13 +551,13 @@ app.post("/api/bookings", async (req, res) => {
 
   try {
     await db.query(
-      `INSERT INTO bookings (id, name, email, date, timeSlot, purpose, notes)
+      `INSERT INTO appointments (id, name, email, date, timeSlot, purpose, notes)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [id, name, email, date, timeSlot, purpose, notes || ""]
     );
-    res.status(201).json({ id, message: "Booking created" });
+    res.status(201).json({ id, message: "Appointment created" });
   } catch (err) {
-    console.error("Insert booking error:", err.message);
+    console.error("Insert appointment error:", err.message);
     res.status(500).json({ error: "Database error" });
   }
 });
@@ -741,28 +741,28 @@ app.post('/api/librarian/borrow-requests/update-status', async (req, res) => {
   }
 });
 
-// ===================== API FOR MANAGING BOOKINGS =====================
-app.get('/api/bookings', async (req, res) => {
+// ===================== API FOR MANAGING APPOINTMENTS =====================
+app.get('/api/appointments', async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT id, name, email, DATE_FORMAT(date, '%Y-%m-%d') AS date, timeSlot, purpose, notes, DATE_ADD(createdAt, INTERVAL 8 HOUR) AS createdAt, status
-       FROM bookings 
+       FROM appointments
        ORDER BY createdAt DESC`
     );
-    
-    res.json({ success: true, bookings: rows || [] });
+
+    res.json({ success: true, appointments: rows || [] });
   } catch (err) {
-    console.error("Fetch bookings error:", err.message);
-    res.status(500).json({ success: false, error: 'Database error fetching bookings.' });
+    console.error("Fetch appointments error:", err.message);
+    res.status(500).json({ success: false, error: 'Database error fetching appointments.' });
   }
 });
 
-// Update booking status
-app.post('/api/bookings/update-status', async (req, res) => {
-  const { bookingId, newStatus } = req.body;
+// Update appointment status
+app.post('/api/appointments/update-status', async (req, res) => {
+  const { appointmentId, newStatus } = req.body;
 
-  if (!bookingId || !newStatus) {
-    return res.status(400).json({ success: false, message: 'Missing booking ID or new status.' });
+  if (!appointmentId || !newStatus) {
+    return res.status(400).json({ success: false, message: 'Missing appointment ID or new status.' });
   }
   if (!['Pending', 'Confirmed', 'Cancelled'].includes(newStatus)) {
     return res.status(400).json({ success: false, message: 'Invalid status provided.' });
@@ -770,18 +770,18 @@ app.post('/api/bookings/update-status', async (req, res) => {
 
   try {
     const [result] = await db.query(
-      'UPDATE bookings SET request_status = ? WHERE id = ?',
-      [newStatus, bookingId]
+      'UPDATE appointments SET request_status = ? WHERE id = ?',
+      [newStatus, appointmentId]
     );
 
     if (result.affectedRows === 0) {
-      return res.status(404).json({ success: false, message: 'Booking not found.' });
+      return res.status(404).json({ success: false, message: 'Appointment not found.' });
     }
 
-    res.json({ success: true, message: 'Booking status updated.' });
+    res.json({ success: true, message: 'Appointment status updated.' });
   } catch (err) {
-    console.error("Update booking status error:", err.message);
-    res.status(500).json({ success: false, error: 'Database error updating booking status.' });
+    console.error("Update appointment status error:", err.message);
+    res.status(500).json({ success: false, error: 'Database error updating appointment status.' });
   }
 });
 
