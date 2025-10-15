@@ -5,6 +5,7 @@ const bcrypt = require('bcrypt');
 const booksRouter = require('./routes/books');
 const db = require('./db'); // <-- should export mysql2 pool.promise()
 const crypto = require("crypto");
+const nodemailer = require('nodemailer');
 
 const app = express();
 app.use(express.json());
