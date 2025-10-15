@@ -671,6 +671,8 @@ app.post("/api/appointments", async (req, res) => {
         [customId, autoIncrementId]
     );
 
+    autoIncrementId += 1;
+
     // If you need the ID to be returned, use the customId
     res.status(201).json({ 
         success: true,
