@@ -648,21 +648,39 @@ app.get('/api/librarian/stats', async (req, res) => {
 app.post("/api/appointments", async (req, res) => {
   const { name, email, date, timeSlot, purpose, notes } = req.body || {};
   if (!name || !email || !date || !timeSlot || !purpose) {
-    return res.status(400).json({ error: "Missing required fields" });
+    return res.status(400).json({ success: false, error: "Missing required fields" });
   }
-
-  const id = crypto.randomUUID();
+  
+  // NOTE: We remove the crypto.randomUUID() line as the database will generate the key.
 
   try {
-    await db.query(
-      `INSERT INTO appointments (id, name, email, date, timeSlot, purpose, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [id, name, email, date, timeSlot, purpose, notes || ""]
+    // 1. Insert the appointment data. We let the DB generate the ID (AUTO_INCREMENT key).
+    const [result] = await db.query(
+      `INSERT INTO appointments (name, email, date, timeSlot, purpose, notes)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [name, email, date, timeSlot, purpose, notes || ""]
     );
-    res.status(201).json({ id, message: "Appointment created" });
+
+    const autoIncrementId = result.insertId; 
+    const currentYear = new Date().getFullYear();
+
+    const customId = `${currentYear}-${autoIncrementId}`;
+
+    await db.query(
+        `UPDATE appointments SET id = ? WHERE id = ?`,
+        [customId, autoIncrementId]
+    );
+
+    // If you need the ID to be returned, use the customId
+    res.status(201).json({ 
+        success: true,
+        id: customId, // Returning the new formatted ID
+        message: "Appointment created" 
+    });
+
   } catch (err) {
     console.error("Insert appointment error:", err.message);
-    res.status(500).json({ error: "Database error" });
+    res.status(500).json({ success: false, error: "Database error" });
   }
 });
 
