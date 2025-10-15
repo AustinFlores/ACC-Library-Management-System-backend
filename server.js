@@ -568,7 +568,7 @@ app.get('/api/librarian/stats', async (req, res) => {
     const totalBooks = await getCount('SELECT COUNT(*) FROM books');
     const borrowedBooks = await getCount('SELECT COUNT(*) FROM books WHERE status = "Borrowed"');
     const activeStudents = await getCount('SELECT COUNT(*) FROM students');
-    const visitsToday = await getCount('SELECT COUNT(*) FROM appointments WHERE date = CURDATE()');
+    const visitsToday = await getCount('SELECT COUNT(*) FROM AttendanceLog WHERE DATE(entry_timestamp) = CURDATE()');
 
     res.json({
       totalBooks,
