@@ -6,6 +6,11 @@ const booksRouter = require('./routes/books');
 const db = require('./db'); // <-- should export mysql2 pool.promise()
 const crypto = require("crypto");
 const nodemailer = require('nodemailer');
+const axios = require('axios');
+
+const TEXTBEE_API_KEY = process.env.TEXTBEE_API_KEY;
+const TEXTBEE_URL = 'https://api.textbee.dev/api/v1';
+const DEVICE_ID = process.env.DEVICE_ID;
 
 const app = express();
 app.use(express.json());
@@ -275,7 +280,7 @@ app.get('/api/attendance/occupancy', async (req, res) => {
         const sql = `
             SELECT COUNT(*) AS currentCount
             FROM AttendanceLog
-            WHERE exit_timestamp IS NULL;
+            WHERE exit_timestamp IS NULL AND DATE(entry_timestamp) = CURRENT_DATE();
         `;
         
         // Execute the query. We expect the result to be an array/set of rows.
@@ -329,7 +334,7 @@ app.post('/api/attendance/toggle', async (req, res) => {
         const activeEntry = activeEntryRows.length > 0;
 
         // 3. Get Current Occupancy Count (Needed for check-in logic)
-        const countSql = `SELECT COUNT(*) AS currentOccupancy FROM AttendanceLog WHERE exit_timestamp IS NULL;`;
+        const countSql = `SELECT COUNT(*) AS currentOccupancy FROM AttendanceLog WHERE exit_timestamp IS NULL AND DATE(entry_timestamp) = CURRENT_DATE();`;
         const [countRows] = await db.query(countSql);
         const currentOccupancy = parseInt(countRows[0]?.currentOccupancy || 0);
         
@@ -458,7 +463,7 @@ app.get('/api/student/borrowed-books', async (req, res) => {
         br.due_date AS dueDate,
         br.status
        FROM borrow_records br
-       JOIN books b ON br.book_id = b.id
+       JOIN Books b ON br.book_id = b.id
        WHERE br.student_id = ?
        ORDER BY br.due_date ASC`,
       [studentId]
@@ -472,21 +477,28 @@ app.get('/api/student/borrowed-books', async (req, res) => {
 });
 
 
-// ===================== API for Student Recommendations =====================
+// ===================== API for Student Recommendations (REVISED) =====================
 app.get('/api/student/recommendations', async (req, res) => {
-    // TODO: Add authorization middleware here to ensure studentId matches logged-in user
     const { studentId } = req.query;
 
     if (!studentId) {
         return res.status(400).json({ success: false, message: 'Student ID is required for recommendations.' });
     }
 
+    // Subquery to check for availability: selects Books.id where at least one copy is 'Available'
+    // This subquery will be used in both recommendation steps.
+    const availableBooksSubquery = `
+        SELECT DISTINCT book_id 
+        FROM BookCopies 
+        WHERE status = 'Available'
+    `;
+
     try {
         // 1. Find categories the student has borrowed from
         const [borrowedCategoriesRows] = await db.query(
             `SELECT DISTINCT b.category
              FROM borrow_records br
-             JOIN books b ON br.book_id = b.id
+             JOIN Books b ON br.book_id = b.id
              WHERE br.student_id = ?`,
             [studentId]
         );
@@ -495,30 +507,40 @@ app.get('/api/student/recommendations', async (req, res) => {
         let recommendedBooks = [];
 
         if (borrowedCategories.length > 0) {
+            // Recommendation Step 1: Preferred Categories
             const [booksFromPreferredCategories] = await db.query(
                 `SELECT DISTINCT b.id, b.title, b.author, b.isbn, b.category
-                 FROM books b
+                 FROM Books b
                  LEFT JOIN borrow_records br ON b.id = br.book_id AND br.student_id = ?
-                 WHERE b.category IN (?) AND b.status = 'Available' AND br.id IS NULL
+                 WHERE b.category IN (?) 
+                   AND b.id IN (${availableBooksSubquery}) 
+                   AND br.id IS NULL
                  ORDER BY RAND() LIMIT 3`,
                 [studentId, borrowedCategories]
             );
             recommendedBooks = booksFromPreferredCategories;
         }
+
         if (recommendedBooks.length < 3) {
             const limit = 3 - recommendedBooks.length;
+            // Recommendation Step 2: General Recommendations
             const [generalRecommendations] = await db.query(
                 `SELECT DISTINCT b.id, b.title, b.author, b.isbn, b.category
-                 FROM books b
+                 FROM Books b
                  LEFT JOIN borrow_records br ON b.id = br.book_id AND br.student_id = ?
-                 WHERE b.status = 'Available' AND br.id IS NULL
+                 WHERE b.id IN (${availableBooksSubquery}) 
+                   AND br.id IS NULL
                  ORDER BY RAND() LIMIT ?`,
                 [studentId, limit]
             );
             recommendedBooks = [...recommendedBooks, ...generalRecommendations];
         }
         
-        res.json({ success: true, books: recommendedBooks });
+        // Remove duplicates if the two steps overlapped (though distinct keywords minimize this)
+        const finalRecommendations = Array.from(new Set(recommendedBooks.map(b => b.id)))
+            .map(id => recommendedBooks.find(b => b.id === id));
+        
+        res.json({ success: true, books: finalRecommendations });
 
     } catch (err) {
         console.error("Error fetching student recommendations for ID", studentId, ":", err.message);
@@ -545,7 +567,7 @@ app.get('/api/student/overdue-books', async (req, res) => {
         br.due_date AS dueDate,
         br.status
        FROM borrow_records br
-       JOIN books b ON br.book_id = b.id
+       JOIN Books b ON br.book_id = b.id
        WHERE br.student_id = ? 
          AND br.status = 'Active' 
          AND br.due_date < CURDATE()
@@ -627,8 +649,11 @@ app.get('/api/librarian/stats', async (req, res) => {
       return Object.values(rows[0])[0];
     };
 
-    const totalBooks = await getCount('SELECT COUNT(*) FROM books');
-    const borrowedBooks = await getCount('SELECT COUNT(*) FROM books WHERE status = "Borrowed"');
+    // totalBooks now counts unique titles
+    const totalBooks = await getCount('SELECT COUNT(*) FROM Books'); 
+    // borrowedBooks counts physical copies with 'Borrowed' status
+    const borrowedBooks = await getCount('SELECT COUNT(*) FROM BookCopies WHERE status = "Borrowed"');
+    
     const activeStudents = await getCount('SELECT COUNT(*) FROM students');
     const visitsToday = await getCount('SELECT COUNT(*) FROM AttendanceLog WHERE DATE(entry_timestamp) = CURDATE()');
 
@@ -758,7 +783,7 @@ app.get('/api/borrow/request', async (req, res) => {
       `SELECT br.*, b.title, b.author,
       DATE_ADD(br.requested_at, INTERVAL 8 HOUR) AS requested_at
        FROM borrow_requests br
-       JOIN books b ON br.book_id = b.id
+       JOIN Books b ON br.book_id = b.id
        WHERE br.student_id = ? 
        ORDER BY br.requested_at DESC`,
       [studentId]
@@ -798,9 +823,39 @@ app.post('/api/borrow/request', async (req, res) => {
   }
 });
 
-// ===================== API for Borrow Requests Actions (Accept/Reject) =====================
+
+async function sendSms(toPhoneNumber, message) {
+  if (!TEXTBEE_API_KEY) {
+    console.error("SMS Error: TEXTBEE_API_KEY is not set.");
+    return;
+  }
+  
+  try {
+    const response = await axios.post(
+  `${TEXTBEE_URL}/gateway/devices/${DEVICE_ID}/send-sms`,
+  {
+    recipients: [ toPhoneNumber ],
+    message: message
+  },
+  { headers: { 'x-api-key': TEXTBEE_API_KEY} }
+);
+
+    // TextBee might return success status in data
+    if (response.data.success === false) {
+       console.warn('TextBee API Reported Error:', response.data.error);
+    } else {
+       console.log(`SMS successfully queued to ${toPhoneNumber}.`);
+    }
+  } catch (error) {
+    // Log the error but DO NOT throw it, as we don't want the database transaction to roll back 
+    // just because the notification failed.
+    console.error(`Error sending SMS to ${toPhoneNumber}:`, error.message);
+  }
+}
+
+//with Textbee SMS sender
+
 app.post('/api/librarian/borrow-requests/update-status', async (req, res) => {
-  // TODO: Add authorization middleware here for 'librarian' or 'admin' role
   const { requestId, actionType } = req.body;
 
   if (!requestId || !actionType || !['Accept', 'Reject'].includes(actionType)) {
@@ -808,13 +863,19 @@ app.post('/api/librarian/borrow-requests/update-status', async (req, res) => {
   }
 
   let connection;
-  try {
-    connection = await db.getConnection(); // Get a connection from the pool
-    await connection.beginTransaction(); // Start a transaction
+  let sentSmsMessage = null; // Variable to hold the final SMS message
 
-    // 1. Get the details of the borrow request
+  try {
+    connection = await db.getConnection(); 
+    await connection.beginTransaction(); 
+
+    // 1. MODIFIED QUERY: Get request details, INCLUDING STUDENT PHONE NUMBER
     const [requestRows] = await connection.query(
-      'SELECT br.student_id, br.book_id, b.title, b.status AS book_status FROM borrow_requests br JOIN books b ON br.book_id = b.id WHERE br.id = ? AND br.request_status = "Pending"',
+      `SELECT br.student_id, br.book_id, b.title, s.phone_number 
+       FROM borrow_requests br 
+       JOIN Books b ON br.book_id = b.id 
+       JOIN students s ON br.student_id = s.id -- Join to get student details
+       WHERE br.id = ? AND br.request_status = "Pending"`,
       [requestId]
     );
     const request = requestRows[0];
@@ -824,50 +885,275 @@ app.post('/api/librarian/borrow-requests/update-status', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Pending borrow request not found or already processed.' });
     }
 
-    const { student_id, book_id, title: bookTitle, book_status } = request;
+    const { student_id, book_id, title: bookTitle, phone_number } = request;
+    let loanedCopyId = null;
+
+    if (!phone_number) {
+        // Warning if phone number is missing, but continue processing the request
+        console.warn(`Student ID ${student_id} is missing a phone number. SMS skipped.`);
+    }
 
     if (actionType === 'Accept') {
-      if (book_status !== 'Available') {
+      
+      // ... (Existing logic to find available copy) ...
+      const [availableCopy] = await connection.query(
+          'SELECT id FROM BookCopies WHERE book_id = ? AND status = "Available" LIMIT 1',
+          [book_id]
+      );
+
+      if (availableCopy.length === 0) {
         await connection.rollback();
-        return res.status(400).json({ success: false, message: `Book "${bookTitle}" is not currently available for borrowing. Current status: ${book_status}.` });
+        return res.status(400).json({ success: false, message: `No copy of book "${bookTitle}" is currently available for borrowing.` });
       }
+      loanedCopyId = availableCopy[0].id;
+      // ************************************
 
       // 2a. Update the borrow_requests table to 'Accepted'
       await connection.query('UPDATE borrow_requests SET request_status = "Accepted" WHERE id = ?', [requestId]);
 
-      // 2b. Add a record to borrow_records (actual loan)
+      // 2b. Add a record to borrow_records 
       const borrowDate = new Date().toISOString().slice(0, 19).replace('T', ' ');
       const dueDate = new Date();
-      dueDate.setDate(dueDate.getDate() + 14); // Example: Due in 14 days
-      const dueDateFormatted = dueDate.toISOString().slice(0, 10); // YYYY-MM-DD
+      dueDate.setDate(dueDate.getDate() + 14); 
+      const dueDateFormatted = dueDate.toISOString().slice(0, 10); // Format YYYY-MM-DD
 
       await connection.query(
         `INSERT INTO borrow_records (student_id, book_id, borrow_date, due_date, status)
          VALUES (?, ?, ?, ?, ?)`,
         [student_id, book_id, borrowDate, dueDateFormatted, 'Active']
       );
+      
+      // 2c. Update the specific copy's status to 'Borrowed' in BookCopies
+      await connection.query('UPDATE BookCopies SET status = "Borrowed" WHERE id = ?', [loanedCopyId]);
 
-      // 2c. Update the books table status to 'Borrowed'
-      await connection.query('UPDATE books SET status = "Borrowed" WHERE id = ?', [book_id]);
-
-      await connection.commit(); // Commit the transaction
-      res.json({ success: true, message: `Borrow request for "${bookTitle}" accepted. Book marked as Borrowed.`, bookTitle });
+      await connection.commit(); 
+      
+      // *** SMS INTEGRATION for ACCEPTANCE ***
+      if (phone_number) {
+          sentSmsMessage = `Library: Your request for "${bookTitle}" has been accepted. Please pick up the book. Due date is ${dueDateFormatted}.`;
+          await sendSms(phone_number, sentSmsMessage);
+      }
+      // **************************************
+      
+      res.json({ success: true, message: `Borrow request for "${bookTitle}" accepted. Copy ID ${loanedCopyId} marked as Borrowed.`, bookTitle, loanedCopyId });
 
     } else if (actionType === 'Reject') {
       // 3. Update the borrow_requests table to 'Rejected'
       await connection.query('UPDATE borrow_requests SET request_status = "Rejected" WHERE id = ?', [requestId]);
-      await connection.commit(); // Commit the transaction
+      
+      await connection.commit(); 
+      
+      // *** SMS INTEGRATION for REJECTION ***
+      if (phone_number) {
+          sentSmsMessage = `Library: Your request for "${bookTitle}" has been rejected by the librarian.`;
+          await sendSms(phone_number, sentSmsMessage);
+      }
+      // **************************************
+
       res.json({ success: true, message: `Borrow request for "${bookTitle}" rejected.`, bookTitle });
     }
 
   } catch (err) {
-    if (connection) await connection.rollback(); // Rollback on error
+    if (connection) await connection.rollback(); 
     console.error(`Error processing borrow request action (${actionType}):`, err.message);
     res.status(500).json({ success: false, error: 'Database error processing borrow request.' });
   } finally {
-    if (connection) connection.release(); // Release the connection
+    if (connection) connection.release(); 
   }
 });
+
+// ===================== API for Borrow Requests Actions (Accept/Reject) =====================
+/*
+app.post('/api/librarian/borrow-requests/update-status', async (req, res) => {
+  const { requestId, actionType } = req.body;
+
+  if (!requestId || !actionType || !['Accept', 'Reject'].includes(actionType)) {
+    return res.status(400).json({ success: false, message: 'Invalid request: missing ID or invalid action type.' });
+  }
+
+  let connection;
+  try {
+    connection = await db.getConnection(); 
+    await connection.beginTransaction(); 
+
+    // 1. Get request details (book_id is the metadata ID)
+    const [requestRows] = await connection.query(
+      'SELECT br.student_id, br.book_id, b.title FROM borrow_requests br JOIN Books b ON br.book_id = b.id WHERE br.id = ? AND br.request_status = "Pending"',
+      [requestId]
+    );
+    const request = requestRows[0];
+
+    if (!request) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: 'Pending borrow request not found or already processed.' });
+    }
+
+    const { student_id, book_id, title: bookTitle } = request;
+    let loanedCopyId = null;
+
+    if (actionType === 'Accept') {
+      
+      // *** NEW LOGIC: FIND AVAILABLE COPY ***
+      const [availableCopy] = await connection.query(
+          'SELECT id FROM BookCopies WHERE book_id = ? AND status = "Available" LIMIT 1',
+          [book_id]
+      );
+
+      if (availableCopy.length === 0) {
+        await connection.rollback();
+        return res.status(400).json({ success: false, message: `No copy of book "${bookTitle}" is currently available for borrowing.` });
+      }
+      loanedCopyId = availableCopy[0].id;
+      // ************************************
+
+      // 2a. Update the borrow_requests table to 'Accepted'
+      await connection.query('UPDATE borrow_requests SET request_status = "Accepted" WHERE id = ?', [requestId]);
+
+      // 2b. Add a record to borrow_records (We insert the metadata ID, as your table expects it)
+      // NOTE: Ideally, we would track loanedCopyId here too.
+      const borrowDate = new Date().toISOString().slice(0, 19).replace('T', ' ');
+      const dueDate = new Date();
+      dueDate.setDate(dueDate.getDate() + 14); 
+      const dueDateFormatted = dueDate.toISOString().slice(0, 10);
+
+      await connection.query(
+        `INSERT INTO borrow_records (student_id, book_id, borrow_date, due_date, status)
+         VALUES (?, ?, ?, ?, ?)`,
+        [student_id, book_id, borrowDate, dueDateFormatted, 'Active']
+      );
+      
+      // 2c. Update the specific copy's status to 'Borrowed' in BookCopies
+      await connection.query('UPDATE BookCopies SET status = "Borrowed" WHERE id = ?', [loanedCopyId]);
+
+      await connection.commit(); 
+      res.json({ success: true, message: `Borrow request for "${bookTitle}" accepted. Copy ID ${loanedCopyId} marked as Borrowed.`, bookTitle, loanedCopyId });
+
+    } else if (actionType === 'Reject') {
+      // 3. Update the borrow_requests table to 'Rejected'
+      await connection.query('UPDATE borrow_requests SET request_status = "Rejected" WHERE id = ?', [requestId]);
+      await connection.commit(); 
+      res.json({ success: true, message: `Borrow request for "${bookTitle}" rejected.`, bookTitle });
+    }
+
+  } catch (err) {
+    if (connection) await connection.rollback(); 
+    console.error(`Error processing borrow request action (${actionType}):`, err.message);
+    res.status(500).json({ success: false, error: 'Database error processing borrow request.' });
+  } finally {
+    if (connection) connection.release(); 
+  }
+}); */
+
+
+/* WITH TWILIO SMS NOTIFICATION
+app.post('/api/librarian/borrow-requests/update-status', async (req, res) => {
+  const { requestId, actionType } = req.body;
+
+  if (!requestId || !actionType || !['Accept', 'Reject'].includes(actionType)) {
+    return res.status(400).json({ success: false, message: 'Invalid request: missing ID or invalid action type.' });
+  }
+
+  let connection;
+  try {
+    connection = await db.getConnection(); 
+    await connection.beginTransaction(); 
+
+    // 1. Get request details and student ID
+    const [requestRows] = await connection.query(
+      'SELECT br.student_id, br.book_id, b.title FROM borrow_requests br JOIN Books b ON br.book_id = b.id WHERE br.id = ? AND br.request_status = "Pending"',
+      [requestId]
+    );
+    const request = requestRows[0];
+
+    if (!request) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: 'Pending borrow request not found or already processed.' });
+    }
+
+    const { student_id, book_id, title: bookTitle } = request;
+    let loanedCopyId = null;
+
+    if (actionType === 'Accept') {
+      
+      // 1.1. Fetch Student Details for SMS
+      // ASSUMPTION: 'phone_number' column exists in students table
+      const [studentInfo] = await connection.query(
+        'SELECT name, phone_number FROM students WHERE id = ?',
+        [student_id]
+      );
+      const studentName = studentInfo[0]?.name;
+      const studentPhone = studentInfo[0]?.phone_number;
+      
+      // 1.2. FIND AVAILABLE COPY
+      const [availableCopy] = await connection.query(
+          'SELECT id FROM BookCopies WHERE book_id = ? AND status = "Available" LIMIT 1',
+          [book_id]
+      );
+
+      if (availableCopy.length === 0) {
+        await connection.rollback();
+        return res.status(400).json({ success: false, message: `No copy of book "${bookTitle}" is currently available for borrowing.` });
+      }
+      loanedCopyId = availableCopy[0].id;
+      
+      // 2a. Update the borrow_requests table to 'Accepted'
+      await connection.query('UPDATE borrow_requests SET request_status = "Accepted" WHERE id = ?', [requestId]);
+
+      // 2b. Add a record to borrow_records
+      const borrowDate = new Date().toISOString().slice(0, 19).replace('T', ' ');
+      const dueDate = new Date();
+      dueDate.setDate(dueDate.getDate() + 14); 
+      const dueDateFormatted = dueDate.toISOString().slice(0, 10);
+
+      await connection.query(
+        `INSERT INTO borrow_records (student_id, book_id, borrow_date, due_date, status)
+         VALUES (?, ?, ?, ?, ?)`,
+        [student_id, book_id, borrowDate, dueDateFormatted, 'Active']
+      );
+      
+      // 2c. Update the specific copy's status to 'Borrowed' in BookCopies
+      await connection.query('UPDATE BookCopies SET status = "Borrowed" WHERE id = ?', [loanedCopyId]);
+
+      
+      // 3. Send SMS Alert (Non-critical step)
+      if (twilioClient && studentPhone) {
+          try {
+              const smsMessage = `Library Alert for ${studentName}: Your request for "${bookTitle}" has been ACCEPTED. Please pick up your copy by ${dueDateFormatted}. (Copy ID: ${loanedCopyId})`;
+              
+              await twilioClient.messages.create({
+                  body: smsMessage,
+                  from: TWILIO_PHONE_NUMBER,
+                  to: studentPhone
+              });
+              console.log(`SMS sent successfully to ${studentPhone}`);
+          } catch (smsError) {
+              console.error('Failed to send SMS notification:', smsError);
+              // Continue processing even if SMS fails
+          }
+      } else if (!twilioClient) {
+          console.warn('Twilio client is not initialized. SMS skipped.');
+      } else {
+          console.warn(`Student ${student_id} is missing a phone number. SMS skipped.`);
+      }
+
+      await connection.commit(); 
+      res.json({ success: true, message: `Borrow request for "${bookTitle}" accepted. Copy ID ${loanedCopyId} marked as Borrowed.`, bookTitle, loanedCopyId });
+
+    } else if (actionType === 'Reject') {
+      // 4. Update the borrow_requests table to 'Rejected'
+      await connection.query('UPDATE borrow_requests SET request_status = "Rejected" WHERE id = ?', [requestId]);
+      await connection.commit(); 
+      res.json({ success: true, message: `Borrow request for "${bookTitle}" rejected.`, bookTitle });
+    }
+
+  } catch (err) {
+    if (connection) await connection.rollback(); 
+    console.error(`Error processing borrow request action (${actionType}):`, err.message);
+    res.status(500).json({ success: false, error: 'Database error processing borrow request.' });
+  } finally {
+    if (connection) connection.release(); 
+  }
+}); */
 
 // ===================== API FOR MANAGING APPOINTMENTS =====================
 app.get('/api/appointments', async (req, res) => {
@@ -941,7 +1227,7 @@ app.get('/api/librarian/recent-activity', async (req, res) => {
     const [activity] = await db.query(`
       SELECT b.title as item, s.name as user, DATE_FORMAT(br.borrow_date, '%Y-%m-%d') as date
       FROM borrow_records br
-      JOIN books b ON br.book_id = b.id
+      JOIN Books b ON br.book_id = b.id
       JOIN students s ON br.student_id = s.id
       WHERE br.borrow_date IS NOT NULL
       ORDER BY br.borrow_date DESC
@@ -963,7 +1249,7 @@ app.get('/api/librarian/overdue-books', async (req, res) => {
     const [overdueBooks] = await db.query(`
       SELECT b.id, b.title, s.name as student, DATE_FORMAT(br.due_date, '%Y-%m-%d') as dueDate
       FROM borrow_records br
-      JOIN books b ON br.book_id = b.id
+      JOIN Books b ON br.book_id = b.id
       JOIN students s ON br.student_id = s.id
       WHERE br.return_date IS NULL AND br.due_date < CURDATE()
       ORDER BY br.due_date ASC
@@ -1025,7 +1311,7 @@ app.get('/api/librarian/pending-borrows', async (req, res) => {
       SELECT br.id, s.name as student, b.title as book, DATE_FORMAT(DATE_ADD(br.requested_at, INTERVAL 8 HOUR), '%Y-%m-%d %H:%i') as requestedDate
       FROM borrow_requests br
       JOIN students s ON br.student_id = s.id
-      JOIN books b ON br.book_id = b.id
+      JOIN Books b ON br.book_id = b.id
       WHERE br.request_status = 'Pending'
       ORDER BY br.requested_at ASC
     `);
@@ -1037,62 +1323,79 @@ app.get('/api/librarian/pending-borrows', async (req, res) => {
   }
 });
 
-// ===================== API FOR BOOK RETURN =====================
+// ===================== API FOR BOOK RETURN (Revised to use BookCopies.id) =====================
 app.post('/api/books/return', async (req, res) => {
-  // TODO: Add authorization middleware here for 'librarian' or 'admin' role
-  const { book_id } = req.body;
-  console.log(`Received book return request for book_id: ${book_id}`);
+  // book_copy_id is the ID of the physical book copy being returned (BookCopies.id)
+  const { book_id: book_copy_id } = req.body; 
 
-  if (!book_id) {
-    return res.status(400).json({ success: false, message: 'Book ID is required to return a book.' });
+  if (!book_copy_id) {
+    return res.status(400).json({ success: false, message: 'Book copy ID is required to return a book.' });
   }
 
+  let connection;
   try {
-    // 1. Find the latest 'Active' record for this book
-    const [borrowRecords] = await db.query(
+    connection = await db.getConnection(); 
+    await connection.beginTransaction();
+
+    // 1. Check if the copy exists, its status, and get its metadata ID (B.id)
+    const [copyInfo] = await connection.query(
+      `SELECT C.status, B.id AS metadataId, B.title 
+       FROM BookCopies C 
+       JOIN Books B ON C.book_id = B.id 
+       WHERE C.id = ?`,
+      [book_copy_id]
+    );
+
+    if (copyInfo.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: 'Book copy not found in the system.' });
+    }
+
+    const { status: currentStatus, metadataId: metadata_id, title: bookTitle } = copyInfo[0];
+
+    if (currentStatus === 'Available') {
+      await connection.rollback();
+      return res.status(400).json({ success: false, message: `Book copy "${bookTitle}" is already marked as Available.` });
+    }
+    
+    // We only proceed if status is 'Borrowed' (or potentially 'Damaged'/'Lost' if you allow those to be returned)
+
+    // 2. Find the latest 'Active' borrow record associated with the metadata ID
+    // NOTE: This is a weakness because we don't know *which copy* the borrow_record points to, 
+    // but we use the metadata ID to close the loan.
+    const [borrowRecords] = await connection.query(
       'SELECT id, student_id FROM borrow_records WHERE book_id = ? AND status = "Active" ORDER BY borrow_date DESC LIMIT 1',
-      [book_id]
+      [metadata_id]
     );
 
     if (borrowRecords.length === 0) {
-      // If no active borrowed record, check if the book even exists
-      const [bookCheck] = await db.query('SELECT title, status FROM books WHERE id = ?', [book_id]);
-      if (bookCheck.length === 0) {
-        return res.status(404).json({ success: false, message: 'Book not found in the system.' });
-      } else if (bookCheck[0].status === 'Available') {
-        return res.status(400).json({ success: false, message: `Book "${bookCheck[0].title}" (ID: ${book_id}) is already marked as Available.` });
-      } else {
-        // Book exists but isn't marked 'Borrowed' in borrow_records or books table
-        return res.status(400).json({ success: false, message: `Book "${bookCheck[0].title}" (ID: ${book_id}) is not currently marked as borrowed. Current status: ${bookCheck[0].status}.` });
-      }
+        // Log an error but still mark the copy as available if it was borrowed/lost/damaged
+        console.warn(`No active borrow record found for metadata ID ${metadata_id}. Force updating copy status.`);
+    } else {
+        const borrowRecordId = borrowRecords[0].id;
+
+        // 3. Update the borrow_records status to 'Returned' and set return_date
+        await connection.query(
+          'UPDATE borrow_records SET status = "Returned", return_date = NOW() WHERE id = ?',
+          [borrowRecordId]
+        );
     }
-
-    const borrowRecordId = borrowRecords[0].id;
-    const studentId = borrowRecords[0].student_id; // For potential logging/audit
-
-    // 2. Update the borrow_records status to 'Returned' and set return_date
-    await db.query(
-      'UPDATE borrow_records SET status = "Returned", return_date = NOW() WHERE id = ?',
-      [borrowRecordId]
+    
+    // 4. Update the specific copy's status to 'Available' in BookCopies
+    await connection.query(
+      'UPDATE BookCopies SET status = "Available" WHERE id = ?',
+      [book_copy_id]
     );
-    console.log(`Borrow record ${borrowRecordId} updated to Returned for book ${book_id}.`);
 
-    // 3. Update the books table status to 'Available'
-    await db.query(
-      'UPDATE books SET status = "Available" WHERE id = ?',
-      [book_id]
-    );
-    console.log(`Book ${book_id} status updated to Available in books table.`);
-
-    // 4. Get book title for response message
-    const [bookInfo] = await db.query('SELECT title FROM books WHERE id = ?', [book_id]);
-    const bookTitle = bookInfo.length > 0 ? bookInfo[0].title : book_id;
-
-    res.json({ success: true, message: `Book "${bookTitle}" returned successfully.`, bookTitle, borrowRecordId, studentId });
+    await connection.commit();
+    res.json({ success: true, message: `Book "${bookTitle}" returned successfully.`, bookTitle, returnedCopyId: book_copy_id });
 
   } catch (err) {
+    if (connection) await connection.rollback();
     console.error('Error marking book as returned:', err.message);
     res.status(500).json({ success: false, error: 'Database error while returning book.' });
+  } finally {
+    if (connection) connection.release();
   }
 });
 
