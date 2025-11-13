@@ -930,7 +930,7 @@ app.post('/api/librarian/borrow-requests/update-status', async (req, res) => {
       
       // *** SMS INTEGRATION for ACCEPTANCE ***
       if (phone_number) {
-          sentSmsMessage = `Library: Your request for "${bookTitle}" has been accepted. Please pick up the book. Due date is ${dueDateFormatted}.`;
+          sentSmsMessage = `ACC Library: Your request for "${bookTitle}" has been accepted. Please pick up the book on or before ${borrowDate}. Due date is ${dueDateFormatted}.`;
           await sendSms(phone_number, sentSmsMessage);
       }
       // **************************************
@@ -945,7 +945,7 @@ app.post('/api/librarian/borrow-requests/update-status', async (req, res) => {
       
       // *** SMS INTEGRATION for REJECTION ***
       if (phone_number) {
-          sentSmsMessage = `Library: Your request for "${bookTitle}" has been rejected by the librarian.`;
+          sentSmsMessage = `ACC Library: Your request for "${bookTitle}" has been rejected by the librarian.`;
           await sendSms(phone_number, sentSmsMessage);
       }
       // **************************************
